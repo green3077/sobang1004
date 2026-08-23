@@ -1,6 +1,6 @@
 {
-  "versionCode": 29,
-  "versionName": "1.28",
+  "versionCode": 30,
+  "versionName": "1.29",
   "apkUrl": "https://green3077.github.io/sobang1004/fire-inspection.apk",
-  "notes": "지적사항 목록의 미해결/해결 배지가 전체 회차 합산이 아닌 최신 방문 회차 기준으로 표시되도록 수정"
+  "notes": "새 점검 회차 시작 시 바로 자료 올리기 창이 열리도록 변경, '지적사항 없음' 버튼을 '모든 지적 내역 삭제'로 변경"
 }

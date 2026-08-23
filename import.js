@@ -102,6 +102,53 @@ const FireImport = (() => {
     return null;
   }
 
+  // HWPX(신 한글 포맷) 표에서 세로 병합(rowSpan)된 칸은 병합 시작 행에만 <hp:tc>가 존재하고 이어지는
+  // 행에는 그 칸 자체가 아예 없다(워드 w:tbl의 vMerge와 달리 빈 자리도 안 남긴다) - 그래서 tc를 열
+  // 순서대로 그냥 나열하면 뒤 열들이 앞으로 밀린다. rowSpan/colSpan을 반영해 각 tc가 차지하는 자리를
+  // 미리 점유 표시해두고, 각 행에서 다음 tc를 "아직 점유 안 된" 첫 열에 배치하는 방식으로 표를 복원한다.
+  function hwpxTableToGrid(tblEl) {
+    const trs = Array.from(tblEl.getElementsByTagName("hp:tr"));
+    const rowCnt = trs.length;
+    const grid = Array.from({ length: rowCnt }, () => []);
+    const occupied = Array.from({ length: rowCnt }, () => new Set());
+    trs.forEach((tr, r) => {
+      const tcs = Array.from(tr.getElementsByTagName("hp:tc"));
+      let col = 0;
+      for (const tc of tcs) {
+        while (occupied[r].has(col)) col++;
+        const spanEl = tc.getElementsByTagName("hp:cellSpan")[0];
+        const colSpan = spanEl ? parseInt(spanEl.getAttribute("colSpan") || "1", 10) : 1;
+        const rowSpan = spanEl ? parseInt(spanEl.getAttribute("rowSpan") || "1", 10) : 1;
+        const text = Array.from(tc.getElementsByTagName("hp:t")).map((t) => t.textContent).join("");
+        grid[r][col] = text;
+        for (let rr = r; rr < Math.min(r + rowSpan, rowCnt); rr++) {
+          for (let cc = col; cc < col + colSpan; cc++) {
+            if (rr === r && cc === col) continue;
+            occupied[rr].add(cc);
+            if (grid[rr][cc] === undefined) grid[rr][cc] = "";
+          }
+        }
+        col += colSpan;
+      }
+    });
+    return grid.map((row) => row.map((c) => c || ""));
+  }
+
+  async function parseHwpxFile(file) {
+    const zip = await JSZip.loadAsync(file);
+    const sectionNames = Object.keys(zip.files).filter((n) => /^Contents\/section\d+\.xml$/.test(n)).sort();
+    for (const name of sectionNames) {
+      const xmlText = await zip.file(name).async("text");
+      const xmlDoc = new DOMParser().parseFromString(xmlText, "application/xml");
+      const tables = Array.from(xmlDoc.getElementsByTagName("hp:tbl"));
+      for (const tbl of tables) {
+        const parsed = rowsToDeficiencies(hwpxTableToGrid(tbl));
+        if (parsed) return parsed;
+      }
+    }
+    return null;
+  }
+
   // 같은 줄(같은 y) 안에서 글자들을 x간격(12pt 초과)으로만 나눠 칸을 추정한다 - 표 헤더처럼 모든 칸에
   // 글자가 있는 줄에서는 잘 맞지만, 세로 병합된 칸이 있는 줄(예: '설비' 칸이 비어 보이는 줄)에서 이
   // 방식을 그대로 쓰면 있는 칸들이 앞으로 밀려버린다 - 그래서 헤더를 찾은 뒤에는 이 함수를 헤더 줄
@@ -244,5 +291,5 @@ const FireImport = (() => {
     return { rows, lowConfidence };
   }
 
-  return { parseExcelFile, parseWordFile, parsePdfFile, extractPdfRows, rowsToDeficiencies };
+  return { parseExcelFile, parseWordFile, parseHwpxFile, parsePdfFile, extractPdfRows, rowsToDeficiencies };
 })();

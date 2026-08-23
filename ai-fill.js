@@ -4,8 +4,17 @@
 // 호출이 실패하면 호출부(app.js)가 기존 정규식 기반 파서로 자동 폴백한다.
 const AiFill = (() => {
   const ENABLED_STORAGE = "fireInspectionAiEnabled";
-  const PROXY_BASE = "https://cigar-log-gemini-proxy.cigar-log-gemini-proxy.workers.dev";
-  const GEMINI_MODELS = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash"];
+  // 2026-08-23: Cloudflare Worker 프록시(cigar-log-gemini-proxy)의 발신 IP가 구글 Gemini API에
+  // "User location is not supported"로 계속 걸려서(같은 키를 브라우저에서 직접 호출하면 항상 성공 -
+  // 결제 연결 등 계정 조치로도 전혀 해결 안 됨, 원인은 Worker 자체의 IP 대역으로 확인) Vercel(Node.js
+  // 런타임)로 옮김 - 로직은 100% 동일(모델 경로 그대로 전달, X-App-Secret/Origin 검사도 동일).
+  const PROXY_BASE = "https://gemini-api-proxy-sooty-one.vercel.app";
+  // 프록시가 요구하는 공유 시크릿 - 클라이언트 JS가 공개 배포되므로 이 값도 결국 읽을 수 있어 완벽한
+  // 인증은 아니지만, workers.dev 주소를 무작위로 스캔해 오는 봇성 오남용은 이걸로 막힌다.
+  const APP_SECRET = "a255ad243fa8457b822e73d365cba1e0";
+  // 2026-08-21 cigar-log 쪽에서 이미 확인됨: gemini-2.5-flash/gemini-2.0-flash는 구글이 완전히
+  // 폐지해 항상 404를 반환한다 - 폴백 목록에서 빼고 gemini-flash-latest로 대체.
+  const GEMINI_MODELS = ["gemini-3.6-flash", "gemini-flash-latest"];
   const geminiUrl = (model) => `${PROXY_BASE}/v1beta/models/${model}:generateContent`;
   const IMAGE_MEDIA_TYPES = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", bmp: "image/bmp", gif: "image/gif" };
 
@@ -171,7 +180,7 @@ const AiFill = (() => {
       try {
         const res = await fetch(geminiUrl(model), {
           method: "POST",
-          headers: { "content-type": "application/json" },
+          headers: { "content-type": "application/json", "x-app-secret": APP_SECRET },
           body: JSON.stringify(body),
           signal: controller.signal
         });

@@ -1874,9 +1874,9 @@
       <h2>${escapeHtml(site ? site.name : "")} · 지적사항 회차</h2>
       <div class="report-meta-row"><span class="label">주소</span><span>${escapeHtml(site && site.address ? site.address : "-")}</span></div>
     `;
-    // "지적사항 없음"은 회차를 하나도 안 만들고 "확인은 했지만 없다"고 표시하는 버튼이라, 이미
-    // 회차가 있으면(=실제로 뭔가 등록했으면) 의미가 없어 숨긴다.
-    $("#btnMarkNoDeficiency").classList.toggle("hidden", rounds.length > 0);
+    // "모든 지적 내역 삭제"는 회차 안에 지운 지적사항이 있어야 의미가 있으므로, 등록된 회차가
+    // 하나도 없으면(=지울 게 없으면) 숨긴다.
+    $("#btnDeleteAllSiteDeficiencies").classList.toggle("hidden", rounds.length === 0);
 
     const list = $("#deficiencyRoundsList");
     if (rounds.length === 0) {
@@ -1948,6 +1948,9 @@
     if (!date) return;
     const round = await FireDB.addRound({ siteId: currentDeficiencySiteId, date, label: "", createdAt: new Date().toISOString() });
     await openRoundDeficiencies(currentDeficiencySiteId, round.id);
+    // 새 회차를 시작한 김에 바로 자료를 올릴 수 있도록 업로드 창을 띄운다 - "지적사항 자료
+    // 올리기" 버튼(btnImportData)을 또 눌러야 하는 수고를 줄이기 위함. 취소하면 그냥 빈 회차만 남는다.
+    $("#fileUploadModal").classList.remove("hidden");
   });
 
   $("#btnBackFromRounds").addEventListener("click", async () => {
@@ -2178,11 +2181,18 @@
     toast("지적사항을 모두 삭제했습니다.");
   });
 
-  $("#btnMarkNoDeficiency").addEventListener("click", async () => {
-    const ok = await confirmDialog("이 현장은 지적사항이 없는 것으로 표시할까요?");
+  $("#btnDeleteAllSiteDeficiencies").addEventListener("click", async () => {
+    const defs = await FireDB.getDeficienciesBySite(currentDeficiencySiteId);
+    if (defs.length === 0) {
+      toast("삭제할 지적사항이 없습니다.");
+      return;
+    }
+    const ok = await confirmDialog(`이 현장의 모든 점검 회차에 등록된 지적사항 ${defs.length}건을 전부 삭제할까요?\n점검 회차 자체는 남고 그 안의 지적사항만 삭제됩니다. 이 작업은 되돌릴 수 없습니다.`);
     if (!ok) return;
-    await FireDB.updateSite(currentDeficiencySiteId, { deficiencyReviewed: true });
-    toast("지적사항 없음으로 표시했습니다.");
+    for (const def of defs) {
+      await FireDB.deleteDeficiency(def.id);
+    }
+    toast("모든 지적사항을 삭제했습니다.");
     await renderDeficiencyRounds();
   });
 
@@ -2239,6 +2249,11 @@
           rows = result.rows;
           lowConfidence = result.lowConfidence;
           typeLabel = "PDF";
+        } else if (aiExt === "hwpx") {
+          // AI(Gemini) 호출이 실패해도(프록시 장애, 모델 사용중지 등) 표 구조가 있는 문서는 여기서
+          // 건질 수 있다 - hwp는 위에서 hwpx로 변환됐을 때만(aiExt) 이 경로를 탄다.
+          rows = await FireImport.parseHwpxFile(aiFile);
+          typeLabel = "한글(HWPX)";
         } else {
           toast(`지원하지 않는 파일 형식입니다 (.xlsx, .docx, .pdf${AiFill.isEnabled() ? ", .hwp, .hwpx, 사진" : ""}만 가능).`, "error");
           return;
