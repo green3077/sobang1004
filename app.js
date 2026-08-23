@@ -1894,7 +1894,9 @@
       const badges = [
         open > 0 ? `<span class="badge badge-open">미해결 ${open}</span>` : "",
         resolved > 0 ? `<span class="badge badge-resolved">해결 ${resolved}</span>` : "",
-        (open === 0 && resolved === 0) ? `<span class="badge badge-scheduled">항목 없음</span>` : ""
+        // 지적사항 메인메뉴(업체 카드)와 같은 상태 표기를 쓴다 - 항목이 없는 회차를 "항목 없음"이라고
+        // 따로 부르면 메인메뉴의 "검토중"과 말이 달라 같은 상태를 가리키는지 헷갈린다.
+        (open === 0 && resolved === 0) ? `<span class="badge badge-pending">검토중</span>` : ""
       ].join(" ");
       return `
         <div class="list-card" data-round="${r.id}">

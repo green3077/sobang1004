@@ -1,6 +1,6 @@
 {
-  "versionCode": 30,
-  "versionName": "1.29",
+  "versionCode": 31,
+  "versionName": "1.30",
   "apkUrl": "https://green3077.github.io/sobang1004/fire-inspection.apk",
-  "notes": "새 점검 회차 시작 시 바로 자료 올리기 창이 열리도록 변경, '지적사항 없음' 버튼을 '모든 지적 내역 삭제'로 변경"
+  "notes": "점검 회차 목록에서 항목 없는 회차의 표시를 '항목 없음'에서 '검토중'으로 변경(지적사항 메인메뉴 상태 표기와 통일)"
 }
