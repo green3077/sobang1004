@@ -1,6 +1,6 @@
 {
-  "versionCode": 32,
-  "versionName": "1.31",
+  "versionCode": 33,
+  "versionName": "1.32",
   "apkUrl": "https://green3077.github.io/sobang1004/fire-inspection.apk",
-  "notes": "지적사항 관리 화면(회차 내부)에 '지적사항 없음' 버튼 추가"
+  "notes": "회차별 '지적사항 없음' 상태를 회차마다 따로 저장하도록 수정 - 새 회차를 추가해도 이전 회차의 '지적사항 없음' 표시가 '검토중'으로 바뀌지 않음"
 }

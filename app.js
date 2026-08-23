@@ -1655,19 +1655,19 @@
     });
   }
 
-  // 지적사항이 하나도 없는 현장은 "확인해봤는데 정말 없음"(deficiencyReviewed로 명시적으로
+  // 지적사항이 하나도 없는 현장은 "확인해봤는데 정말 없음"(최신 회차의 noDeficiency로 명시적으로
   // 표시함)과 "신규 등록이라 아직 확인 전"을 구분한다 - 둘 다 그냥 "지적사항 없음"이라고
   // 하면 아직 검토 안 한 신규 거래처도 이미 확인 끝난 것처럼 보여서 놓치기 쉽다.
   function deficiencySiteStatuses(c, s) {
     const statuses = [];
     if (c.open > 0) statuses.push("open");
     if (c.resolved > 0) statuses.push("resolved");
-    if (c.open === 0 && c.resolved === 0) statuses.push(s.deficiencyReviewed ? "none" : "pending");
+    if (c.open === 0 && c.resolved === 0) statuses.push(c.noDeficiency ? "none" : "pending");
     return statuses;
   }
 
   function deficiencyHubCardHtml(s, c) {
-    const noneBadge = s.deficiencyReviewed
+    const noneBadge = c.noDeficiency
       ? `<span class="badge badge-scheduled">지적사항 없음</span>`
       : `<span class="badge badge-pending">검토중</span>`;
     const badges = [
@@ -1771,11 +1771,12 @@
     const countsBySite = new Map();
     sites.forEach((s) => {
       const siteRounds = roundsBySite.get(s.id) || [];
-      let latestRoundId = null;
+      let latestRound = null;
       if (siteRounds.length > 0) {
         siteRounds.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-        latestRoundId = siteRounds[0].id;
+        latestRound = siteRounds[0];
       }
+      const latestRoundId = latestRound ? latestRound.id : null;
       const c = { open: 0, resolved: 0 };
       defs.forEach((d) => {
         if (d.siteId !== s.id) return;
@@ -1783,6 +1784,9 @@
         if (!inLatest) return;
         d.resolved ? c.resolved++ : c.open++;
       });
+      // "지적사항 없음"은 회차마다 따로 기록된다(round.noDeficiency) - 회차가 하나도 없는
+      // 옛 현장(레거시)만 예외적으로 site.deficiencyReviewed를 그대로 본다.
+      c.noDeficiency = latestRound ? !!latestRound.noDeficiency : !!s.deficiencyReviewed;
       countsBySite.set(s.id, c);
     });
     return countsBySite;
@@ -1886,16 +1890,14 @@
       return;
     }
 
-    // 지적사항 메인메뉴(업체 카드)는 "가장 최근 회차 + 현장 단위 deficiencyReviewed"만 보고 상태를
-    // 정하므로(latestRoundCountsBySite), 회차 목록에서도 최신 회차에 한해 같은 규칙을 적용해야 두
-    // 화면의 글자가 어긋나지 않는다. 최신 회차가 아닌 옛 회차는 계속 "검토중"으로 둔다.
-    const latestRoundId = rounds[0] ? rounds[0].id : null;
+    // "지적사항 없음"은 회차마다 따로 기록된다(round.noDeficiency) - 각 회차는 자신이 실제로
+    // "없음"으로 확인됐는지만 보고, 최신 회차 여부와는 무관하게 그 표시를 유지한다.
     const defsByRound = await Promise.all(rounds.map((r) => FireDB.getDeficienciesByRound(r.id)));
     list.innerHTML = rounds.map((r, i) => {
       const defs = defsByRound[i];
       const open = defs.filter((d) => !d.resolved).length;
       const resolved = defs.filter((d) => d.resolved).length;
-      const emptyBadge = (site && site.deficiencyReviewed && r.id === latestRoundId)
+      const emptyBadge = r.noDeficiency
         ? `<span class="badge badge-scheduled">지적사항 없음</span>`
         : `<span class="badge badge-pending">검토중</span>`;
       const badges = [
@@ -1954,11 +1956,6 @@
     const date = await promptDate("새 점검 회차 날짜", todayISO());
     if (!date) return;
     const round = await FireDB.addRound({ siteId: currentDeficiencySiteId, date, label: "", createdAt: new Date().toISOString() });
-    // 새 회차는 아직 검토 전이므로, 이전 회차에서 "지적사항 없음"으로 표시해뒀던 현장 단위 플래그를
-    // 남겨두면 이번 방문도 확인도 안 했는데 이미 "없음"으로 보이는 문제가 생긴다 - 초기화한다.
-    if ((await FireDB.getSite(currentDeficiencySiteId)).deficiencyReviewed) {
-      await FireDB.updateSite(currentDeficiencySiteId, { deficiencyReviewed: false });
-    }
     await openRoundDeficiencies(currentDeficiencySiteId, round.id);
     // 새 회차를 시작한 김에 바로 자료를 올릴 수 있도록 업로드 창을 띄운다 - "지적사항 자료
     // 올리기" 버튼(btnImportData)을 또 눌러야 하는 수고를 줄이기 위함. 취소하면 그냥 빈 회차만 남는다.
@@ -2193,9 +2190,10 @@
     toast("지적사항을 모두 삭제했습니다.");
   });
 
-  // 이 회차를 "확인해봤는데 지적사항이 정말 없다"고 표시한다 - 현장 단위 플래그(deficiencyReviewed)를
-  // 쓰므로, 지적사항 메인메뉴의 업체 배지도 곧바로 "지적사항 없음"으로 바뀐다(latestRoundCountsBySite가
-  // 최신 회차 기준으로 보길래, 옛 회차에서 눌러도 최신 회차가 비어 있어야 실제로 반영된다).
+  // 이 회차를 "확인해봤는데 지적사항이 정말 없다"고 표시한다 - 회차 단위 플래그(round.noDeficiency)를
+  // 쓰므로, 다른 회차(옛 회차·새 회차)의 표시에는 영향을 주지 않는다. 최신 회차일 때만 지적사항
+  // 메인메뉴의 업체 배지에도 곧바로 "지적사항 없음"으로 반영된다(latestRoundCountsBySite가 최신
+  // 회차 기준으로 보기 때문).
   $("#btnMarkRoundNoDeficiency").addEventListener("click", async () => {
     if (currentDeficiencies.length > 0) {
       toast("이미 등록된 지적사항이 있습니다. 먼저 삭제한 뒤 이용해주세요.", "error");
@@ -2203,7 +2201,7 @@
     }
     const ok = await confirmDialog("이 현장은 지적사항이 없는 것으로 표시할까요?");
     if (!ok) return;
-    await FireDB.updateSite(currentDeficiencySiteId, { deficiencyReviewed: true });
+    await FireDB.updateRound(currentRoundId, { noDeficiency: true });
     toast("지적사항 없음으로 표시했습니다.");
   });
 
@@ -2874,8 +2872,8 @@
   // 확인 필요), 새 버전이 있으면 외부 브라우저로 APK 다운로드 URL을 열어 다운로드->설치를 대신 시작해준다.
   // version.js의 APP_VERSION은 마지막으로 웹 파일이 바뀐 실제 날짜/시간(한국시간)이고,
   // APP_VERSION_CODE/NAME은 APK를 새로 빌드해서 배포할 때만 올리는 별개의 버전 번호다.
-  const APP_VERSION_CODE = 29;
-  const APP_VERSION_NAME = "1.28";
+  const APP_VERSION_CODE = 33;
+  const APP_VERSION_NAME = "1.32";
   const UPDATE_MANIFEST_URL = "https://green3077.github.io/sobang1004/version.json";
   const IS_NATIVE_UPDATE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
   // 이 프로젝트는 번들러(webpack/vite 등)를 쓰지 않는 순수 스크립트 앱이라 @capacitor/core 전체가
