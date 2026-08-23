@@ -1886,17 +1886,22 @@
       return;
     }
 
+    // 지적사항 메인메뉴(업체 카드)는 "가장 최근 회차 + 현장 단위 deficiencyReviewed"만 보고 상태를
+    // 정하므로(latestRoundCountsBySite), 회차 목록에서도 최신 회차에 한해 같은 규칙을 적용해야 두
+    // 화면의 글자가 어긋나지 않는다. 최신 회차가 아닌 옛 회차는 계속 "검토중"으로 둔다.
+    const latestRoundId = rounds[0] ? rounds[0].id : null;
     const defsByRound = await Promise.all(rounds.map((r) => FireDB.getDeficienciesByRound(r.id)));
     list.innerHTML = rounds.map((r, i) => {
       const defs = defsByRound[i];
       const open = defs.filter((d) => !d.resolved).length;
       const resolved = defs.filter((d) => d.resolved).length;
+      const emptyBadge = (site && site.deficiencyReviewed && r.id === latestRoundId)
+        ? `<span class="badge badge-scheduled">지적사항 없음</span>`
+        : `<span class="badge badge-pending">검토중</span>`;
       const badges = [
         open > 0 ? `<span class="badge badge-open">미해결 ${open}</span>` : "",
         resolved > 0 ? `<span class="badge badge-resolved">해결 ${resolved}</span>` : "",
-        // 지적사항 메인메뉴(업체 카드)와 같은 상태 표기를 쓴다 - 항목이 없는 회차를 "항목 없음"이라고
-        // 따로 부르면 메인메뉴의 "검토중"과 말이 달라 같은 상태를 가리키는지 헷갈린다.
-        (open === 0 && resolved === 0) ? `<span class="badge badge-pending">검토중</span>` : ""
+        (open === 0 && resolved === 0) ? emptyBadge : ""
       ].join(" ");
       return `
         <div class="list-card" data-round="${r.id}">
@@ -1949,6 +1954,11 @@
     const date = await promptDate("새 점검 회차 날짜", todayISO());
     if (!date) return;
     const round = await FireDB.addRound({ siteId: currentDeficiencySiteId, date, label: "", createdAt: new Date().toISOString() });
+    // 새 회차는 아직 검토 전이므로, 이전 회차에서 "지적사항 없음"으로 표시해뒀던 현장 단위 플래그를
+    // 남겨두면 이번 방문도 확인도 안 했는데 이미 "없음"으로 보이는 문제가 생긴다 - 초기화한다.
+    if ((await FireDB.getSite(currentDeficiencySiteId)).deficiencyReviewed) {
+      await FireDB.updateSite(currentDeficiencySiteId, { deficiencyReviewed: false });
+    }
     await openRoundDeficiencies(currentDeficiencySiteId, round.id);
     // 새 회차를 시작한 김에 바로 자료를 올릴 수 있도록 업로드 창을 띄운다 - "지적사항 자료
     // 올리기" 버튼(btnImportData)을 또 눌러야 하는 수고를 줄이기 위함. 취소하면 그냥 빈 회차만 남는다.
@@ -2181,6 +2191,20 @@
     currentDeficiencies = [];
     await renderDeficiencies();
     toast("지적사항을 모두 삭제했습니다.");
+  });
+
+  // 이 회차를 "확인해봤는데 지적사항이 정말 없다"고 표시한다 - 현장 단위 플래그(deficiencyReviewed)를
+  // 쓰므로, 지적사항 메인메뉴의 업체 배지도 곧바로 "지적사항 없음"으로 바뀐다(latestRoundCountsBySite가
+  // 최신 회차 기준으로 보길래, 옛 회차에서 눌러도 최신 회차가 비어 있어야 실제로 반영된다).
+  $("#btnMarkRoundNoDeficiency").addEventListener("click", async () => {
+    if (currentDeficiencies.length > 0) {
+      toast("이미 등록된 지적사항이 있습니다. 먼저 삭제한 뒤 이용해주세요.", "error");
+      return;
+    }
+    const ok = await confirmDialog("이 현장은 지적사항이 없는 것으로 표시할까요?");
+    if (!ok) return;
+    await FireDB.updateSite(currentDeficiencySiteId, { deficiencyReviewed: true });
+    toast("지적사항 없음으로 표시했습니다.");
   });
 
   $("#btnDeleteAllSiteDeficiencies").addEventListener("click", async () => {
