@@ -24,6 +24,11 @@
   let scheduleSelectedDate = "";      // 스케줄 관리에서 선택된 날짜 (YYYY-MM-DD)
   let scheduleCompanySearchTerm = ""; // 스케줄 관리 업체 선택 목록 검색어
   let scheduleStagedIds = new Set();  // 업체 선택 화면에서 "확인"을 누르기 전까지 임시로 체크된 업체 (저장 전)
+  // 업체 선택 목록 전용 정렬/필터 상태 - "거래처 관리"/"점검팀" 화면의 sitesSortMode와는 별개로 둔다
+  // (날짜별로 업체를 고르는 일시적인 작업이라, 여기서 지역별을 골랐다고 다른 화면까지 바뀌면 오히려 헷갈림).
+  let schedulePickSortMode = "name";      // "name"(가나다순) | "region"(지역별)
+  let schedulePickSelectedRegion = null;
+  let schedulePickMonthOnly = false;      // "이번달" 필터
 
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -1011,6 +1016,13 @@
         result = await ClientImport.parseClientFile(file, (percent) =>
           ImportLoading.setProgress(percent, "사진에서 글자를 인식하고 있습니다.")
         );
+      }
+      // 담당기사(성명/연락처)는 자료에서 절대 자동으로 채우지 않는다(사용자 요청) - AI/정규식 추출
+      // 쪽에서 이미 이 두 필드를 요청/인식하지 않도록 해뒀지만, 혹시라도 값이 섞여 들어오는 경로가
+      // 생기더라도 폼에 닿기 전에 여기서 한 번 더 확실히 비운다.
+      if (result && result.fields) {
+        delete result.fields.engineerName;
+        delete result.fields.engineerPhone;
       }
       {
         const guessName = (result.fields && result.fields.name) || file.name.replace(/\.[^.]+$/, "");
@@ -3367,25 +3379,16 @@
     $("#btnScheduleUnconfirm").classList.toggle("hidden", !confirmed);
   }
 
-  // 업체 선택 목록은 클릭 즉시 저장하지 않고 scheduleStagedIds(임시 체크 상태)만 바꾼다 -
-  // 실제로 그 날짜의 예정 업체로 저장되는 시점은 "확인" 버튼을 눌렀을 때뿐이다.
-  async function renderScheduleCompanyPickList() {
-    const sites = await FireDB.getAllSites();
-    const term = scheduleCompanySearchTerm.trim();
-    const filtered = (term ? sites.filter((s) => s.name.includes(term)) : sites)
-      .sort((a, b) => a.name.localeCompare(b.name, "ko"));
-
-    const list = $("#scheduleCompanyPickList");
-    if (filtered.length === 0) {
-      list.innerHTML = `<div class="empty-state">${term ? "검색 결과가 없습니다." : "등록된 업체가 없습니다."}</div>`;
-      return;
-    }
-    list.innerHTML = filtered.map((s) => `
-      <div class="schedule-company-pick-row ${scheduleStagedIds.has(s.id) ? "is-added" : ""}" data-id="${s.id}">
-        ${scheduleStagedIds.has(s.id) ? "☑" : "☐"} ${escapeHtml(s.name)}
+  function scheduleCompanyPickRowHtml(s) {
+    const checked = scheduleStagedIds.has(s.id);
+    return `
+      <div class="schedule-company-pick-row ${checked ? "is-added" : ""}" data-id="${s.id}">
+        ${checked ? "☑" : "☐"} ${escapeHtml(s.name)}
       </div>
-    `).join("");
-    $$("#scheduleCompanyPickList .schedule-company-pick-row").forEach((el) => {
+    `;
+  }
+  function bindScheduleCompanyPickRowClicks(container) {
+    Array.from(container.querySelectorAll(".schedule-company-pick-row")).forEach((el) => {
       el.addEventListener("click", () => {
         const id = el.dataset.id;
         if (scheduleStagedIds.has(id)) scheduleStagedIds.delete(id);
@@ -3394,6 +3397,91 @@
       });
     });
   }
+
+  // 업체 선택 목록은 클릭 즉시 저장하지 않고 scheduleStagedIds(임시 체크 상태)만 바꾼다 -
+  // 실제로 그 날짜의 예정 업체로 저장되는 시점은 "확인" 버튼을 눌렀을 때뿐이다. 검색어가 있으면
+  // 정렬/지역/이번달 상태와 무관하게 이름으로만 걸러진 평평한 목록을 보여준다(검색이 우선).
+  async function renderScheduleCompanyPickList() {
+    $("#btnSchedulePickSortByName").classList.toggle("active", schedulePickSortMode === "name");
+    $("#btnSchedulePickSortByRegion").classList.toggle("active", schedulePickSortMode === "region");
+    $("#btnSchedulePickFilterThisMonth").classList.toggle("active", schedulePickMonthOnly);
+
+    const allSites = await FireDB.getAllSites();
+    allSites.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+    const sites = schedulePickMonthOnly ? allSites.filter(isSiteInCurrentMonth) : allSites;
+
+    const list = $("#scheduleCompanyPickList");
+    const term = scheduleCompanySearchTerm.trim();
+    if (term) {
+      const filtered = sites.filter((s) => s.name.includes(term));
+      list.innerHTML = filtered.length === 0
+        ? `<div class="empty-state">검색 결과가 없습니다.</div>`
+        : filtered.map(scheduleCompanyPickRowHtml).join("");
+      if (filtered.length > 0) bindScheduleCompanyPickRowClicks(list);
+      return;
+    }
+
+    if (sites.length === 0) {
+      list.innerHTML = `<div class="empty-state">${schedulePickMonthOnly ? "이번 달 종합점검/작동점검 대상 거래처가 없습니다." : "등록된 업체가 없습니다."}</div>`;
+      return;
+    }
+
+    if (schedulePickSortMode === "region") {
+      if (schedulePickSelectedRegion) {
+        const filtered = sites.filter((s) => classifyRegion(s.address) === schedulePickSelectedRegion);
+        const backBtnHtml = `<button class="btn btn-secondary region-back-row" type="button">← 지역 목록으로 (${escapeHtml(schedulePickSelectedRegion)})</button>`;
+        list.innerHTML = filtered.length === 0
+          ? `${backBtnHtml}<div class="empty-state">이 지역에 등록된 현장이 없습니다.</div>`
+          : backBtnHtml + filtered.map(scheduleCompanyPickRowHtml).join("");
+        if (filtered.length > 0) bindScheduleCompanyPickRowClicks(list);
+        list.querySelector(".region-back-row").addEventListener("click", () => {
+          schedulePickSelectedRegion = null;
+          renderScheduleCompanyPickList();
+        });
+        return;
+      }
+      const counts = new Map();
+      sites.forEach((s) => {
+        const region = classifyRegion(s.address);
+        counts.set(region, (counts.get(region) || 0) + 1);
+      });
+      const daeguOrder = DAEGU_DISTRICTS.filter((g) => counts.has(g));
+      const otherOrder = PROVINCE_PATTERNS.map(([, label]) => label).filter((l) => l !== "대구" && counts.has(l));
+      const orderedRegions = [...daeguOrder, ...otherOrder];
+      if (counts.has("대구 기타")) orderedRegions.push("대구 기타");
+      if (counts.has("지역 미상")) orderedRegions.push("지역 미상");
+      list.innerHTML = `<div class="region-grid">${orderedRegions.map((r) => `
+        <button class="region-btn" data-region="${escapeHtml(r)}" type="button">
+          <span class="region-btn-name">${escapeHtml(r)}</span>
+          <span class="region-btn-count">${counts.get(r)}개</span>
+        </button>
+      `).join("")}</div>`;
+      Array.from(list.querySelectorAll(".region-btn")).forEach((btn) => {
+        btn.addEventListener("click", () => {
+          schedulePickSelectedRegion = btn.dataset.region;
+          renderScheduleCompanyPickList();
+        });
+      });
+      return;
+    }
+
+    list.innerHTML = sites.map(scheduleCompanyPickRowHtml).join("");
+    bindScheduleCompanyPickRowClicks(list);
+  }
+
+  $("#btnSchedulePickSortByName").addEventListener("click", () => {
+    schedulePickSortMode = "name";
+    schedulePickSelectedRegion = null;
+    renderScheduleCompanyPickList();
+  });
+  $("#btnSchedulePickSortByRegion").addEventListener("click", () => {
+    schedulePickSortMode = "region";
+    renderScheduleCompanyPickList();
+  });
+  $("#btnSchedulePickFilterThisMonth").addEventListener("click", () => {
+    schedulePickMonthOnly = !schedulePickMonthOnly;
+    renderScheduleCompanyPickList();
+  });
 
   async function refreshScheduleManage() {
     await Promise.all([renderScheduleCalendar(), renderScheduleDayDetail(), renderScheduleCompanyPickList()]);

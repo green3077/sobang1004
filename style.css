@@ -572,9 +572,6 @@ input[readonly] { background: var(--neutral-bg); color: var(--text-dim); }
 .schedule-legend-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--sched-pending-bg); border: 2px solid var(--sched-pending); display: inline-block; }
 .schedule-legend-dot-confirmed { background: var(--sched-confirmed-bg); border: 2px solid var(--sched-confirmed); }
 .schedule-legend-dot-none { background: var(--sched-none-bg); border: 2px solid var(--text-dim); }
-.schedule-legend-text { font-weight: 800; }
-.schedule-legend-text.is-sat { color: var(--sched-sat); }
-.schedule-legend-text.is-sun { color: var(--danger); }
 
 .schedule-selected-date { font-size: 17px; font-weight: 800; color: var(--accent-dark); margin-bottom: 10px; }
 .schedule-day-company-list { margin-bottom: 12px; }
