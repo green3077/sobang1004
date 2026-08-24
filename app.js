@@ -1644,7 +1644,9 @@
   $("#btnCompleteSiteVisit").addEventListener("click", async () => {
     const ok = await confirmDialog("오늘 방문을 완료 처리할까요? (마지막 점검일이 갱신됩니다)");
     if (!ok || !galleryActiveInspectionId) return;
+    const insp = await FireDB.getInspection(galleryActiveInspectionId);
     await FireDB.updateInspection(galleryActiveInspectionId, { status: "completed", completedDate: todayISO() });
+    if (insp) await ensureDeficiencyRoundForDate(insp.siteId, insp.scheduledDate);
     toast("방문이 완료 처리되었습니다.", "success");
     await openInspectionDetail(galleryActiveInspectionId);
   });
@@ -1914,8 +1916,8 @@
   });
 
   // 회차 도입 전(2026-08-22 이전)에 만들어진 지적사항은 roundId가 아예 없다 - 그런 현장을 처음
-  // 열 때 딱 한 번, 그 기존 지적사항 전체를 "기존 기록"이라는 회차 하나로 묶어준다(가장 이른
-  // 생성일을 회차 날짜로 사용). 이미 회차가 하나라도 있으면 마이그레이션할 게 없으므로 그냥 통과.
+  // 열 때 딱 한 번, 그 기존 지적사항 전체를 회차 하나로 묶어준다(가장 이른 생성일을 회차 날짜로
+  // 사용). 이미 회차가 하나라도 있으면 마이그레이션할 게 없으므로 그냥 통과.
   async function ensureRoundsForSite(siteId) {
     const rounds = await FireDB.getRoundsBySite(siteId);
     if (rounds.length > 0) return rounds;
@@ -1923,11 +1925,22 @@
     if (legacyDefs.length === 0) return rounds;
     legacyDefs.sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
     const date = (legacyDefs[0].createdAt || new Date().toISOString()).slice(0, 10);
-    const round = await FireDB.addRound({ siteId, date, label: "기존 기록", createdAt: new Date().toISOString() });
+    const round = await FireDB.addRound({ siteId, date, label: "", createdAt: new Date().toISOString() });
     for (const def of legacyDefs) {
       await FireDB.updateDeficiency(def.id, { roundId: round.id });
     }
     return [round];
+  }
+
+  // 거래처 상세에서 "방문 완료 처리"를 누른 날짜를, 지적사항 메뉴에도 같은 날짜의 회차로 자동
+  // 만들어준다(사용자 요청) - 방문을 마쳤으면 보통 그 자리에서 지적사항도 확인하므로, "+ 새 점검
+  // 회차 시작"으로 같은 날짜를 또 골라야 하는 수고를 없앤다. 그 날짜의 회차가 이미 있으면(예:
+  // 지적사항 메뉴에서 먼저 만들어둔 경우) 중복 생성하지 않고 그대로 둔다.
+  async function ensureDeficiencyRoundForDate(siteId, date) {
+    if (!date) return;
+    const rounds = await FireDB.getRoundsBySite(siteId);
+    if (rounds.some((r) => r.date === date)) return;
+    await FireDB.addRound({ siteId, date, label: "", createdAt: new Date().toISOString() });
   }
 
   async function openSiteRounds(siteId) {
@@ -1976,7 +1989,7 @@
       return `
         <div class="list-card" data-round="${r.id}">
           <div class="list-card-title">
-            <span class="list-card-title-main">${escapeHtml(r.date || "")}${r.label ? ` · ${escapeHtml(r.label)}` : ""}</span>
+            <span class="list-card-title-main">${escapeHtml(r.date || "")}</span>
             <span class="list-card-title-right">
               <span class="list-card-badges">${badges}</span>
               <button type="button" class="list-card-menu-btn" data-menu-btn>⋯</button>
