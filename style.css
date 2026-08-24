@@ -164,7 +164,9 @@ body {
   font-size: 15px;
 }
 .home-todo-item.is-overdue .home-todo-item-icon { background: var(--danger-bg); color: var(--danger); }
+.home-todo-item.is-done .home-todo-item-icon { background: var(--good-bg); color: var(--good); }
 .home-todo-item-body { flex: 1; min-width: 0; }
+.home-todo-item-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .home-todo-item-title { font-size: 15.5px; font-weight: 700; }
 .home-todo-item-sub { font-size: 13.5px; color: var(--text-dim); margin-top: 2px; }
 .home-todo-item-memo {
@@ -449,12 +451,15 @@ a.list-card { display: block; text-decoration: none; color: inherit; }
 .list-card-sub { font-size: 14.5px; color: var(--text-dim); margin-top: 5px; }
 .list-card-static { cursor: default; }
 
-/* 일정관리 화면 전용 - 다른 화면보다 글자를 한 단계 더 키우고 진하게(사용자 요청 - 가독성). */
-#screen-route .card h2 { font-size: 21px; }
-#screen-route .list-card-title { font-size: 20px; }
-#screen-route .list-card-sub { font-size: 16.5px; font-weight: 600; color: var(--text); }
-#screen-route .badge { font-size: 15px; padding: 6px 14px; }
-#screen-route .hint-text { font-size: 15.5px; }
+/* 일정관리 화면 전용 - 처음엔 글자를 크게 키웠는데 너무 커서(사용자 피드백) 다시 줄이고, 대신
+   제목들은 가운데 정렬 + 카드 여백을 줄여서 한 화면에 더 많이 들어오도록 촘촘하게 만들었다. */
+#screen-route .card { padding: 14px 16px; margin-bottom: 10px; }
+#screen-route .card h2 { font-size: 17px; text-align: center; margin: 0; }
+#screen-route .card .hint-text { text-align: center; margin: 4px 0 0; }
+#screen-route .list-card { padding: 10px 14px; margin-bottom: 8px; }
+#screen-route .list-card-title { font-size: 15px; }
+#screen-route .list-card-sub { font-size: 12.5px; font-weight: 500; color: var(--text-dim); }
+#screen-route .badge { font-size: 12px; padding: 4px 10px; }
 
 .list-card-menu-btn {
   flex-shrink: 0;

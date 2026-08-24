@@ -453,31 +453,43 @@
     ]);
     const siteMap = new Map(sites.map((s) => [s.id, s]));
     const lastBySite = computeLastInspectionBySite(inspections);
-    const pending = inspections.filter((i) => i.status !== "completed" && i.scheduledDate && i.scheduledDate <= today);
-    pending.sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate));
-    const pendingSiteIds = new Set(pending.map((i) => i.siteId));
+    // 점검완료 처리를 해도 목록에서 바로 사라지지 않고 "완료" 표시로 남아있게 한다(사용자 요청) -
+    // 단, 오늘 완료한 것만 남기고(completedDate === today) 예전에 완료된 건 그대로 안 보이게 한다.
+    const relevant = inspections.filter((i) => {
+      if (i.status === "completed") return i.completedDate === today;
+      return !!i.scheduledDate && i.scheduledDate <= today;
+    });
+    relevant.sort((a, b) => (a.scheduledDate || "").localeCompare(b.scheduledDate || ""));
+    const relevantSiteIds = new Set(relevant.map((i) => i.siteId));
 
     // 스케줄 관리에서 오늘 날짜로 "일정 확정"한 방문도 오늘의 할일에 포함한다(사용자 요청) - 이미
     // 점검 기록(inspections)으로 오늘 할일에 뜬 거래처는 중복 표시하지 않는다.
     const confirmedSiteIds = (todaySchedule && todaySchedule.confirmed ? todaySchedule.siteIds : [])
-      .filter((id) => siteMap.has(id) && !pendingSiteIds.has(id));
+      .filter((id) => siteMap.has(id) && !relevantSiteIds.has(id));
 
     const list = $("#homeTodoList");
-    if (pending.length === 0 && confirmedSiteIds.length === 0) {
+    if (relevant.length === 0 && confirmedSiteIds.length === 0) {
       list.innerHTML = `<div class="home-todo-empty">오늘 예정된 할일이 없습니다.</div>`;
       return;
     }
-    const inspectionItems = pending.map((insp) => {
+    const inspectionItems = relevant.map((insp) => {
       const site = siteMap.get(insp.siteId);
-      const isOverdue = insp.scheduledDate < today;
+      const done = insp.status === "completed";
+      const isOverdue = !done && insp.scheduledDate < today;
       const last = site ? lastBySite.get(site.id) : null;
       const lastDate = last ? (last.completedDate || last.scheduledDate) : "";
+      const subLine = done
+        ? escapeHtml(insp.type || "점검")
+        : `${escapeHtml(insp.type || "점검")} · ${isOverdue ? `기한초과 (${escapeHtml(insp.scheduledDate)})` : "오늘 예정"}`;
       const html = `
-        <div class="home-todo-item ${isOverdue ? "is-overdue" : ""}" data-site-id="${insp.siteId}">
-          <span class="home-todo-item-icon">${isOverdue ? "⚠️" : "🔔"}</span>
+        <div class="home-todo-item ${isOverdue ? "is-overdue" : ""} ${done ? "is-done" : ""}" data-site-id="${insp.siteId}">
+          <span class="home-todo-item-icon">${done ? "✅" : (isOverdue ? "⚠️" : "🔔")}</span>
           <div class="home-todo-item-body">
-            <div class="home-todo-item-title">${escapeHtml(site ? site.name : "알 수 없는 현장")}</div>
-            <div class="home-todo-item-sub">${escapeHtml(insp.type || "점검")} · ${isOverdue ? `기한초과 (${escapeHtml(insp.scheduledDate)})` : "오늘 예정"}</div>
+            <div class="home-todo-item-title-row">
+              <span class="home-todo-item-title">${escapeHtml(site ? site.name : "알 수 없는 현장")}</span>
+              ${done ? `<span class="badge badge-completed">완료</span>` : ""}
+            </div>
+            <div class="home-todo-item-sub">${subLine}</div>
             <div class="home-todo-item-sub">마지막 점검일: ${lastDate ? escapeHtml(lastDate) : "이력 없음"}</div>
             ${site && site.equipmentMemo ? `<div class="home-todo-item-memo">📝 ${escapeHtml(site.equipmentMemo)}</div>` : ""}
           </div>
@@ -3021,6 +3033,8 @@
   }
 
   async function renderRoute() {
+    const d = new Date();
+    $("#routeHeaderTitle").textContent = `일정관리 ${todayISO()} (${WEEKDAY_LABEL[d.getDay()]})`;
     await renderScheduleAgenda();
     await renderInspectionStatus();
     $("#nearbyRestaurantPicker").classList.add("hidden");
@@ -3041,9 +3055,11 @@
     const [sched, sites, inspections] = await Promise.all([
       FireDB.getScheduleByDate(today), FireDB.getAllSites(), FireDB.getAllInspections()
     ]);
-    const siteIds = sched ? sched.siteIds : [];
+    // 일정 확정("스케줄 관리"의 "일정 확정" 버튼)된 날짜만 여기 표시한다(사용자 요청) - 아직
+    // 확정 안 된(후보만 담아둔) 날짜는 여기 안 뜨고 스케줄 관리 화면에서만 보인다.
+    const siteIds = (sched && sched.confirmed) ? sched.siteIds : [];
     if (siteIds.length === 0) {
-      list.innerHTML = `<div class="empty-state">오늘 스케줄에 등록된 업체가 없습니다.</div>`;
+      list.innerHTML = `<div class="empty-state">오늘 확정된 일정이 없습니다.</div>`;
       return;
     }
     const siteMap = new Map(sites.map((s) => [s.id, s]));
@@ -3075,7 +3091,7 @@
     const today = todayISO();
     const [sched, sites] = await Promise.all([FireDB.getScheduleByDate(today), FireDB.getAllSites()]);
     const siteMap = new Map(sites.map((s) => [s.id, s]));
-    let pickSites = (sched ? sched.siteIds : []).map((id) => siteMap.get(id)).filter(Boolean);
+    let pickSites = ((sched && sched.confirmed) ? sched.siteIds : []).map((id) => siteMap.get(id)).filter(Boolean);
     if (pickSites.length === 0) {
       pickSites = sites.slice().sort((a, b) => a.name.localeCompare(b.name, "ko"));
     }
@@ -3144,11 +3160,14 @@
       if (!byDate.has(i.scheduledDate)) byDate.set(i.scheduledDate, []);
       byDate.get(i.scheduledDate).push(i);
     });
-    const dates = Array.from(byDate.keys()).sort();
+    // 오늘 날짜는 카드 상단 제목("일정관리 YYYY-MM-DD (요일)")과 바로 아래 "오늘의 점검현황"에서
+    // 이미 보여주므로, 이 목록에는 오늘을 뺀 다른 날짜(과거 기한초과/향후 예정)만 남긴다(사용자 요청).
+    const today = todayISO();
+    const dates = Array.from(byDate.keys()).filter((d) => d !== today).sort();
 
     const list = $("#scheduleAgenda");
     if (dates.length === 0) {
-      list.innerHTML = `<div class="empty-state">예정된 점검이 없습니다.</div>`;
+      list.innerHTML = `<div class="empty-state">오늘 외에 예정된 점검이 없습니다.</div>`;
       return;
     }
     // 각 날짜의 업체 나열 순서는 스케줄 관리에서 정한 방문 순서를 따른다(사용자 요청). 예정/기한초과
@@ -3248,8 +3267,8 @@
   // 확인 필요), 새 버전이 있으면 외부 브라우저로 APK 다운로드 URL을 열어 다운로드->설치를 대신 시작해준다.
   // version.js의 APP_VERSION은 마지막으로 웹 파일이 바뀐 실제 날짜/시간(한국시간)이고,
   // APP_VERSION_CODE/NAME은 APK를 새로 빌드해서 배포할 때만 올리는 별개의 버전 번호다.
-  const APP_VERSION_CODE = 40;
-  const APP_VERSION_NAME = "1.39";
+  const APP_VERSION_CODE = 41;
+  const APP_VERSION_NAME = "1.40";
   const UPDATE_MANIFEST_URL = "https://green3077.github.io/sobang1004/version.json";
   const IS_NATIVE_UPDATE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
   // 이 프로젝트는 번들러(webpack/vite 등)를 쓰지 않는 순수 스크립트 앱이라 @capacitor/core 전체가
