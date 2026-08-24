@@ -1,6 +1,6 @@
 {
-  "versionCode": 36,
-  "versionName": "1.35",
+  "versionCode": 37,
+  "versionName": "1.36",
   "apkUrl": "https://green3077.github.io/sobang1004/fire-inspection.apk",
-  "notes": "사진 삭제 동기화가 실제로 반영되도록 재수정 (마지막 한 장을 지웠을 때 안 지워지던 문제), '방문 완료' 문구를 '점검 완료'로 변경"
+  "notes": "일정관리 화면에서 설명 문구와 날짜별 상세/동선 섹션 제거"
 }

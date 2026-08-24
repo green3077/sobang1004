@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>소방점검 관리</title>
 <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-<link rel="stylesheet" href="style.css?v=20260825-0040">
+<link rel="stylesheet" href="style.css?v=20260825-0047">
 </head>
 <body>
 <!-- 스크립트 실행 도중 어디선가 예외가 나면 그 뒤의 코드(버튼 연결 등)가 통째로 실행되지
@@ -404,16 +404,8 @@
   <section id="screen-route" class="screen">
     <div class="card">
       <h2>일정관리</h2>
-      <div class="hint-text">예정된 점검을 날짜별로 모아 보여줍니다. 날짜를 누르면 아래에서 해당 날짜의 방문 현장과 동선을 확인할 수 있습니다.</div>
     </div>
     <div id="scheduleAgenda"></div>
-    <div class="card">
-      <h2>날짜별 상세 / 동선</h2>
-      <div class="field"><span>날짜</span><input type="date" id="routeDate"></div>
-    </div>
-    <div id="routeList"></div>
-    <button class="btn btn-primary btn-large" id="btnOpenGoogleRoute">🗺️ 구글 지도로 동선 보기</button>
-    <div class="hint-text">사무실을 출발지로, 선택한 날짜의 방문 현장을 목적지로 구글 지도 경로가 열립니다. 목적지가 3곳 이상이면 구글 지도 화면에서 '경로 최적화'를 켜면 자동으로 최단 순서로 정렬됩니다.</div>
   </section>
 
   <!-- 스케줄 관리 (날짜별 방문 예정/확정 업체) -->
@@ -559,16 +551,16 @@
      사진이 이상하게 나온다"는, 이미 고쳐서 배포한 버그를 PC에서만 계속 겪은 원인이었다) - 배포마다
      이 값을 version.js의 APP_VERSION과 함께 갱신해야 한다. -->
 <script src="firebase-config.js"></script>
-<script src="version.js?v=20260825-0040"></script>
-<script src="auth.js?v=20260825-0040"></script>
-<script src="db.js?v=20260825-0040"></script>
-<script src="ui.js?v=20260825-0040"></script>
-<script src="import.js?v=20260825-0040"></script>
-<script src="client-import.js?v=20260825-0040"></script>
-<script src="bldreg.js?v=20260825-0040"></script>
-<script src="ai-fill.js?v=20260825-0040"></script>
-<script src="hwpx-export.js?v=20260825-0040"></script>
-<script src="drive.js?v=20260825-0040"></script>
-<script src="app.js?v=20260825-0040"></script>
+<script src="version.js?v=20260825-0047"></script>
+<script src="auth.js?v=20260825-0047"></script>
+<script src="db.js?v=20260825-0047"></script>
+<script src="ui.js?v=20260825-0047"></script>
+<script src="import.js?v=20260825-0047"></script>
+<script src="client-import.js?v=20260825-0047"></script>
+<script src="bldreg.js?v=20260825-0047"></script>
+<script src="ai-fill.js?v=20260825-0047"></script>
+<script src="hwpx-export.js?v=20260825-0047"></script>
+<script src="drive.js?v=20260825-0047"></script>
+<script src="app.js?v=20260825-0047"></script>
 </body>
 </html>

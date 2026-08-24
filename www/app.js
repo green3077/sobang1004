@@ -3016,13 +3016,8 @@
     localStorage.setItem(COMPANY_KEY, JSON.stringify(profile));
   }
 
-  let routeSelectedDate = "";
-
   async function renderRoute() {
-    if (!routeSelectedDate) routeSelectedDate = todayISO();
-    $("#routeDate").value = routeSelectedDate;
     await renderScheduleAgenda();
-    await renderRouteList();
   }
 
   async function renderScheduleAgenda() {
@@ -3056,14 +3051,6 @@
         </div>
       `;
     }).join("");
-    $$("#scheduleAgenda .list-card").forEach((el) => {
-      el.addEventListener("click", async () => {
-        routeSelectedDate = el.dataset.date;
-        $("#routeDate").value = routeSelectedDate;
-        await renderRouteList();
-        $("#routeDate").scrollIntoView({ behavior: "smooth", block: "center" });
-      });
-    });
   }
 
   const CHANGE_HISTORY_VISIBLE_KEY = "fireInspectionShowChangeHistory";
@@ -3136,8 +3123,8 @@
   // 확인 필요), 새 버전이 있으면 외부 브라우저로 APK 다운로드 URL을 열어 다운로드->설치를 대신 시작해준다.
   // version.js의 APP_VERSION은 마지막으로 웹 파일이 바뀐 실제 날짜/시간(한국시간)이고,
   // APP_VERSION_CODE/NAME은 APK를 새로 빌드해서 배포할 때만 올리는 별개의 버전 번호다.
-  const APP_VERSION_CODE = 36;
-  const APP_VERSION_NAME = "1.35";
+  const APP_VERSION_CODE = 37;
+  const APP_VERSION_NAME = "1.36";
   const UPDATE_MANIFEST_URL = "https://green3077.github.io/sobang1004/version.json";
   const IS_NATIVE_UPDATE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
   // 이 프로젝트는 번들러(webpack/vite 등)를 쓰지 않는 순수 스크립트 앱이라 @capacitor/core 전체가
@@ -3313,38 +3300,6 @@
     toast("로그아웃되었습니다.");
   });
 
-  async function renderRouteList() {
-    const [inspections, sites] = await Promise.all([FireDB.getAllInspections(), FireDB.getAllSites()]);
-    const siteMap = new Map(sites.map((s) => [s.id, s]));
-    const dayInspections = inspections.filter((i) => i.scheduledDate === routeSelectedDate);
-    dayInspections.sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
-
-    const list = $("#routeList");
-    if (dayInspections.length === 0) {
-      list.innerHTML = `<div class="empty-state">이 날짜에 예정된 점검이 없습니다.</div>`;
-      return;
-    }
-    list.innerHTML = dayInspections.map((insp) => {
-      const site = siteMap.get(insp.siteId);
-      const st = computeStatus(insp);
-      return `
-        <div class="list-card">
-          <div class="list-card-title">
-            <span>${escapeHtml(site ? site.name : "알 수 없는 현장")}</span>
-            <span class="badge badge-${st}">${STATUS_LABEL[st]}</span>
-          </div>
-          <div class="list-card-sub">${escapeHtml(site && site.address ? site.address : "주소 미입력")}</div>
-          <div class="list-card-sub">${escapeHtml(insp.type)}${insp.inspector ? " · 점검자: " + insp.inspector : ""}</div>
-        </div>
-      `;
-    }).join("");
-  }
-
-  $("#routeDate").addEventListener("change", async (e) => {
-    routeSelectedDate = e.target.value || todayISO();
-    await renderRouteList();
-  });
-
   $("#btnSaveCompany").addEventListener("click", () => {
     const name = $("#companyName").value.trim() || DEFAULT_COMPANY.name;
     const address = $("#companyAddress").value.trim() || DEFAULT_COMPANY.address;
@@ -3354,44 +3309,6 @@
     const licenseNo = $("#companyLicenseNo").value.trim();
     saveCompanyProfile({ name, address, phone, ceo, bizRegNo, licenseNo });
     toast("업체 정보가 저장되었습니다.");
-  });
-
-  $("#btnOpenGoogleRoute").addEventListener("click", async () => {
-    const profile = getCompanyProfile();
-    const [inspections, sites] = await Promise.all([FireDB.getAllInspections(), FireDB.getAllSites()]);
-    const siteMap = new Map(sites.map((s) => [s.id, s]));
-    const dayInspections = inspections.filter((i) => i.scheduledDate === routeSelectedDate);
-    dayInspections.sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
-
-    const addresses = [];
-    let skipped = 0;
-    dayInspections.forEach((insp) => {
-      const site = siteMap.get(insp.siteId);
-      if (site && site.address) addresses.push(site.address);
-      else skipped++;
-    });
-
-    if (addresses.length === 0) {
-      toast("이 날짜에 주소가 등록된 방문 현장이 없습니다.", "error");
-      return;
-    }
-    if (addresses.length > 9) {
-      toast("구글 지도 경로는 최대 9개 경유지까지만 표시됩니다. 앞 9곳만 반영합니다.", "error");
-    }
-    const stops = addresses.slice(0, 9);
-    const destination = stops[stops.length - 1];
-    const waypoints = stops.slice(0, -1);
-
-    const params = new URLSearchParams({
-      api: "1",
-      origin: profile.address,
-      destination,
-      travelmode: "driving"
-    });
-    if (waypoints.length) params.set("waypoints", waypoints.join("|"));
-
-    if (skipped > 0) toast(`주소가 없는 현장 ${skipped}곳은 동선에서 제외되었습니다.`);
-    window.open(`https://www.google.com/maps/dir/?${params.toString()}`, "_blank");
   });
 
   // ================= 스케줄 관리 (날짜별 방문 예정/확정 업체) =================
