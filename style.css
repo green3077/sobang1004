@@ -617,10 +617,11 @@ input[readonly] { background: var(--neutral-bg); color: var(--text-dim); }
 .report-meta-row > span:last-child { flex: 1; min-width: 0; text-align: right; word-break: keep-all; overflow-wrap: break-word; }
 .report-item-note { color: var(--text-dim); margin-top: 5px; }
 
-/* 거래처 상세: 거래처 정보 카드 바로 아래 "오늘 날짜 + 점검하기" 줄 */
-.site-start-inspection-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.site-start-inspection-row #siteTodayDateLabel { font-weight: 700; color: var(--text-dim); }
-.site-start-inspection-row .btn { margin-top: 0; }
+/* 거래처 상세: 거래처 정보 카드 바로 아래 "점검 날짜(수정 가능) + 점검하기" 줄 -
+   둘 다 크게 눌러야 하는 버튼이라 btn-large를 쓰고, 좁은 화면에서는 두 줄로 줄바꿈되게 한다. */
+.site-start-inspection-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.site-start-inspection-row .btn { margin-top: 0; flex: 1 1 150px; }
+.site-inspection-date-btn { text-align: center; }
 
 /* 사진 갤러리 (점검 회차별 현장점검 사진) */
 .gallery-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }

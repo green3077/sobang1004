@@ -3,6 +3,7 @@
   let editingSiteId = null;
   let currentSiteId = null;      // 현장 상세 화면에서 보고 있는 현장
   let currentInspectionId = null; // 점검 상세/사진 갤러리 화면에서 보고 있는 점검 회차(날짜)
+  let selectedInspectionDate = null; // 거래처 상세의 "점검하기" 버튼이 사용할 날짜 - 기본 오늘, 사용자가 수정 가능
   let currentConstructionSiteId = null;  // 공사팀에서 보고 있는 업체(=현장)
   let activeObjectUrls = [];
   let pendingAttachments = [];   // 신규 현장 등록 시 아직 저장 전인 첨부파일 (저장 시점에 실제 siteId로 옮겨 담음)
@@ -397,7 +398,6 @@
     "screen-site-form": "btnCancelSiteForm",
     "screen-site-detail": "btnBackToSites",
     "screen-inspection-detail": "btnBackFromInspectionDetail",
-    "screen-photo-gallery": "btnBackFromGallery",
     "screen-deficiency-rounds": "btnBackFromRounds",
     "screen-deficiencies": "btnBackFromDeficiencies",
     "screen-completion-report": "btnBackFromCompletionReport"
@@ -1293,7 +1293,8 @@
       </div>
     `).join("");
 
-    $("#siteTodayDateLabel").textContent = formatDateWithWeekday(todayISO());
+    selectedInspectionDate = todayISO();
+    renderInspectionDateButton();
 
     const inspections = await FireDB.getInspectionsBySite(id);
     inspections.sort((a, b) => (b.scheduledDate || "").localeCompare(a.scheduledDate || ""));
@@ -1302,8 +1303,33 @@
       listEl.innerHTML = `<div class="empty-state">점검 이력이 없습니다. "점검하기"를 눌러 오늘 방문을 시작하세요.</div>`;
     } else {
       listEl.innerHTML = inspections.map((i) => inspectionCardHtml(i, site)).join("");
-      $$("#siteInspectionsList .list-card").forEach((el) => {
-        el.addEventListener("click", () => openInspectionDetail(el.dataset.id));
+      Array.from(listEl.querySelectorAll(".list-card")).forEach((el) => {
+        const inspId = el.dataset.id;
+        el.addEventListener("click", () => openInspectionDetail(inspId));
+        const menuBtn = el.querySelector("[data-menu-btn]");
+        const menu = el.querySelector("[data-menu]");
+        menuBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const wasOpen = menu === openSiteCardMenu;
+          closeSiteCardMenu();
+          if (!wasOpen) { menu.classList.remove("hidden"); openSiteCardMenu = menu; }
+        });
+        menu.addEventListener("click", (e) => e.stopPropagation());
+        menu.querySelector("[data-menu-edit]").addEventListener("click", async () => {
+          closeSiteCardMenu();
+          const insp = inspections.find((i) => i.id === inspId);
+          const newDate = await promptDate("점검 날짜 수정", insp.scheduledDate);
+          if (!newDate) return;
+          await FireDB.updateInspection(inspId, { scheduledDate: newDate });
+          await openSiteDetail(id);
+        });
+        menu.querySelector("[data-menu-delete]").addEventListener("click", async () => {
+          closeSiteCardMenu();
+          const ok = await confirmDialog("이 점검 기록과 등록된 사진을 삭제할까요? 이 작업은 되돌릴 수 없습니다.");
+          if (!ok) return;
+          await FireDB.deleteInspection(inspId);
+          await openSiteDetail(id);
+        });
       });
     }
     showScreen("screen-site-detail");
@@ -1315,10 +1341,23 @@
     return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 (${WEEKDAY_LABEL[d.getDay()]})`;
   }
 
+  function renderInspectionDateButton() {
+    $("#btnEditInspectionDate").textContent = `${formatDateWithWeekday(selectedInspectionDate)} ✎`;
+  }
+
+  // "점검하기" 버튼 위의 날짜 - 기본은 오늘 날짜지만, 다른 날짜로 점검을 시작/기록해야 할 때를
+  // 대비해 눌러서 바꿀 수 있게 한다(예: 어제 방문했는데 오늘 입력하는 경우).
+  $("#btnEditInspectionDate").addEventListener("click", async () => {
+    const newDate = await promptDate("점검 날짜 선택", selectedInspectionDate);
+    if (!newDate) return;
+    selectedInspectionDate = newDate;
+    renderInspectionDateButton();
+  });
+
   $("#btnStartInspection").addEventListener("click", async () => {
     if (!currentSiteId) return;
     const site = await FireDB.getSite(currentSiteId);
-    const insp = await getOrCreateInspectionForDate(currentSiteId, todayISO(), site);
+    const insp = await getOrCreateInspectionForDate(currentSiteId, selectedInspectionDate, site);
     await openInspectionDetail(insp.id);
   });
 
@@ -1389,20 +1428,31 @@
     return `
       <div class="list-card" data-id="${insp.id}">
         <div class="list-card-title">
-          <span>${escapeHtml(insp.scheduledDate || "")}</span>
-          <span class="badge badge-${st}">${STATUS_LABEL[st]}</span>
+          <span class="list-card-title-main">${escapeHtml(insp.scheduledDate || "")}</span>
+          <span class="list-card-title-right">
+            <span class="badge badge-${st}">${STATUS_LABEL[st]}</span>
+            <button type="button" class="list-card-menu-btn" data-menu-btn>⋯</button>
+          </span>
+        </div>
+        <div class="site-card-menu hidden" data-menu>
+          <button type="button" data-menu-edit>수정하기</button>
+          <button type="button" class="danger" data-menu-delete>삭제</button>
         </div>
         <div class="list-card-sub">${escapeHtml(typeLabel)}${insp.inspector ? " · 점검자: " + escapeHtml(insp.inspector) : ""}</div>
       </div>
     `;
   }
 
-  // 점검 이력 목록에서 날짜 하나를 눌렀을 때: 그 회차의 정보와 "현장점검 사진" 버튼을 보여준다.
+  // 점검 이력 목록에서 날짜 하나를 눌렀을 때: 그 회차의 정보와 사진(업로드/열람)을 한 화면에서 보여준다 -
+  // 예전엔 "현장점검 사진" 버튼을 눌러야 별도 갤러리 화면으로 넘어갔는데, 그 한 단계를 없애고 이 화면
+  // 안에서 바로 사진을 올리고 볼 수 있게 합친 것(사용자 요청, 2026-08-24).
   async function openInspectionDetail(inspId) {
     const insp = await FireDB.getInspection(inspId);
     if (!insp) { openSiteDetail(currentSiteId); return; }
     currentInspectionId = inspId;
     currentSiteId = insp.siteId;
+    galleryActiveInspectionId = inspId;
+    gallerySelected = new Set();
     const site = await FireDB.getSite(insp.siteId);
     const st = computeStatus(insp);
     $("#inspectionDetailInfo").innerHTML = `
@@ -1411,29 +1461,17 @@
       <div class="report-meta-row"><span class="label">종류</span><span>${escapeHtml(inspectionTypeForMonth(site, insp.scheduledDate))}</span></div>
       <div class="report-meta-row"><span class="label">상태</span><span class="badge badge-${st}">${STATUS_LABEL[st]}</span></div>
     `;
+    await loadGalleryPhotos();
     showScreen("screen-inspection-detail");
   }
 
-  $("#btnOpenInspectionGallery").addEventListener("click", () => openPhotoGallery(currentInspectionId));
   $("#btnBackFromInspectionDetail").addEventListener("click", () => openSiteDetail(currentSiteId));
 
-  // ================= 사진 갤러리 (점검 회차별 현장점검 사진) =================
-  let galleryActiveInspectionId = null; // 현재 갤러리가 속한 점검 회차 id - 사진은 이 id로 귀속되고, "방문 완료 처리"도 이 회차를 대상으로 함
+  // ================= 사진 갤러리 (점검 회차별 현장점검 사진 - 점검 상세 화면 안에 포함) =================
+  let galleryActiveInspectionId = null; // 현재 화면이 속한 점검 회차 id - 사진은 이 id로 귀속되고, "방문 완료 처리"도 이 회차를 대상으로 함
   let galleryPhotos = [];              // [{id, blob, createdAt, ...}]
   let gallerySelected = new Set();
   let galleryViewerIndex = -1;
-
-  async function openPhotoGallery(inspectionId) {
-    galleryActiveInspectionId = inspectionId;
-    gallerySelected = new Set();
-    const insp = await FireDB.getInspection(inspectionId);
-    currentSiteId = insp ? insp.siteId : currentSiteId;
-    const site = await FireDB.getSite(currentSiteId);
-    $("#galleryTitle").textContent = `${site ? site.name : ""} · 현장점검 사진 (${insp ? insp.scheduledDate : ""})`;
-    $("#galleryHint").textContent = "현장 사진을 여러 장 올릴 수 있습니다. 사진을 누르면 원본이 크게 보이고, 선택해서 외부로 공유할 수 있습니다.";
-    await loadGalleryPhotos();
-    showScreen("screen-photo-gallery");
-  }
 
   async function loadGalleryPhotos() {
     const all = await FireDB.getPhotosByInspection(galleryActiveInspectionId);
@@ -1608,13 +1646,7 @@
     if (!ok || !galleryActiveInspectionId) return;
     await FireDB.updateInspection(galleryActiveInspectionId, { status: "completed", completedDate: todayISO() });
     toast("방문이 완료 처리되었습니다.", "success");
-  });
-
-  $("#btnBackFromGallery").addEventListener("click", () => {
-    closePhotoViewer();
-    if (currentInspectionId) openInspectionDetail(currentInspectionId);
-    else if (currentSiteId) openSiteDetail(currentSiteId);
-    else { renderSites(); showScreen("screen-sites"); }
+    await openInspectionDetail(galleryActiveInspectionId);
   });
 
   // ================= 지적사항 / 이행완료 (점검 기록과 완전히 분리, 현장에만 귀속) =================
