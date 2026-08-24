@@ -461,6 +461,19 @@ a.list-card { display: block; text-decoration: none; color: inherit; }
 #screen-route .list-card-sub { font-size: 12.5px; font-weight: 500; color: var(--text-dim); }
 #screen-route .badge { font-size: 12px; padding: 4px 10px; }
 
+/* "오늘의 점검현황" 헤더 + 업체 목록을 하나의 색깔 있는 덩어리로 묶어서, 위(일정관리 날짜)/
+   아래(근처 맛집 추천)의 흰 카드들과 한눈에 구분되게 한다(사용자 요청). */
+.route-status-group {
+  background: var(--teal-bg);
+  border: 1px solid var(--teal);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+.route-status-group h2 { color: var(--teal); }
+.route-status-group .list-card { box-shadow: none; }
+.route-status-group .list-card:last-child { margin-bottom: 0; }
+
 .list-card-menu-btn {
   flex-shrink: 0;
   width: 32px;
