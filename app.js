@@ -1624,6 +1624,22 @@
     const all = await FireDB.getPhotosByInspection(galleryActiveInspectionId);
     const photoMap = new Map(all.map((p) => [p.id, p]));
     await fillMissingInspectionPhotosFromDrive(galleryActiveInspectionId, photoMap);
+
+    // 다른 기기에서 삭제한 사진은 이 기기에도 반영되도록 - 점검 회차의 공유 목록(photoIds)에
+    // 없는 사진은 로컬에서도 지운다. photoIds 자체가 한 번도 기록된 적 없는(undefined) 회차는
+    // 이 기능이 생기기 전부터 있던 사진들이라 "없다"는 게 삭제된 건지 애초에 추적 대상이 아니었던
+    // 건지 구분할 수 없으므로 손대지 않는다(예전 사진을 실수로 지우지 않기 위한 안전장치).
+    const insp = await FireDB.getInspection(galleryActiveInspectionId);
+    if (insp && Array.isArray(insp.photoIds)) {
+      const validIds = new Set(insp.photoIds);
+      for (const id of Array.from(photoMap.keys())) {
+        if (!validIds.has(id)) {
+          photoMap.delete(id);
+          await FireDB.deletePhoto(id).catch(() => {});
+        }
+      }
+    }
+
     galleryPhotos = Array.from(photoMap.values()).sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
     gallerySelected = new Set(Array.from(gallerySelected).filter((id) => galleryPhotos.some((p) => p.id === id)));
     renderGalleryGrid();
@@ -1799,10 +1815,12 @@
     await FireDB.deletePhoto(p.id);
     gallerySelected.delete(p.id);
     closePhotoViewer();
-    const insp = await FireDB.getInspection(galleryActiveInspectionId);
-    if (insp && insp.photoIds && insp.photoIds.includes(p.id)) {
-      await FireDB.updateInspection(galleryActiveInspectionId, { photoIds: insp.photoIds.filter((id) => id !== p.id) });
-    }
+    // 남은 사진 id 목록을 항상 공유 데이터(photoIds)에 다시 써준다 - 이 회차가 photoIds를
+    // 아직 한 번도 기록한 적 없어도(이 기능이 생기기 전부터 있던 사진이라도) 지금 이 기기가
+    // 알고 있는 실제 남은 목록으로 채워서, 이후로는 다른 기기가 이미 내려받아 갖고 있던
+    // 사본도 다음에 열 때 loadGalleryPhotos의 정리 로직으로 같이 지워지게 한다.
+    const remaining = galleryPhotos.filter((ph) => ph.id !== p.id).map((ph) => ph.id);
+    await FireDB.updateInspection(galleryActiveInspectionId, { photoIds: remaining });
     await loadGalleryPhotos();
   });
 
@@ -3118,8 +3136,8 @@
   // 확인 필요), 새 버전이 있으면 외부 브라우저로 APK 다운로드 URL을 열어 다운로드->설치를 대신 시작해준다.
   // version.js의 APP_VERSION은 마지막으로 웹 파일이 바뀐 실제 날짜/시간(한국시간)이고,
   // APP_VERSION_CODE/NAME은 APK를 새로 빌드해서 배포할 때만 올리는 별개의 버전 번호다.
-  const APP_VERSION_CODE = 34;
-  const APP_VERSION_NAME = "1.33";
+  const APP_VERSION_CODE = 35;
+  const APP_VERSION_NAME = "1.34";
   const UPDATE_MANIFEST_URL = "https://green3077.github.io/sobang1004/version.json";
   const IS_NATIVE_UPDATE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
   // 이 프로젝트는 번들러(webpack/vite 등)를 쓰지 않는 순수 스크립트 앱이라 @capacitor/core 전체가
