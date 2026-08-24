@@ -393,7 +393,6 @@
     "screen-construction-company": "btnBackFromConstructionCompany",
     "screen-construction-estimates": "btnBackFromConstructionEstimates",
     "screen-construction-history": "btnBackFromConstructionHistory",
-    "screen-inspection-team": "btnBackFromInspectionTeam",
     "screen-site-entry-choice": "btnCancelEntryChoice",
     "screen-site-form": "btnCancelSiteForm",
     "screen-site-detail": "btnBackToSites",
@@ -483,9 +482,13 @@
     });
   }
   $("#btnHomeAddSite").addEventListener("click", () => $("#btnAddSite").click());
+  // "점검팀" 홈 타일 - 기존 "거래처 보기"와 같은 화면(거래처 목록)을 그대로 연다.
   $("#btnHomeViewSites").addEventListener("click", () => { renderSites(); showScreen("screen-sites"); });
-  $("#btnHomeConstructionTeam").addEventListener("click", () => { renderConstructionTeam(); showScreen("screen-construction-team"); });
-  $("#btnHomeInspectionTeam").addEventListener("click", () => showScreen("screen-inspection-team"));
+  // "공사팀" 홈 타일 - 더 이상 공사팀 화면으로 가지 않고, 지적사항 메뉴를 바로 연다(사용자 요청).
+  $("#btnHomeConstructionTeam").addEventListener("click", () => {
+    renderDeficiencyHub().catch(reportLoadFailure);
+    showScreen("screen-deficiency-hub");
+  });
   $("#btnHomeScheduleManage").addEventListener("click", async () => {
     scheduleCalDate = new Date();
     await selectScheduleDate(todayISO());
@@ -493,7 +496,6 @@
   });
   $("#btnBackFromScheduleManage").addEventListener("click", goHome);
   $("#btnBackFromConstructionTeam").addEventListener("click", goHome);
-  $("#btnBackFromInspectionTeam").addEventListener("click", goHome);
 
   // ---------- 공사팀 (업체 = 거래처 재사용, 견적서/공사내역은 업체별 하위 메뉴) ----------
   async function renderConstructionTeam() {
