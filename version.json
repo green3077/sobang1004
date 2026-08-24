@@ -1,6 +1,6 @@
 {
-  "versionCode": 35,
-  "versionName": "1.34",
+  "versionCode": 36,
+  "versionName": "1.35",
   "apkUrl": "https://green3077.github.io/sobang1004/fire-inspection.apk",
-  "notes": "현장점검 사진을 내 기기에서 삭제하면 다른 사람 기기에 이미 내려받아져 있던 사본도 같이 삭제되도록 수정"
+  "notes": "사진 삭제 동기화가 실제로 반영되도록 재수정 (마지막 한 장을 지웠을 때 안 지워지던 문제), '방문 완료' 문구를 '점검 완료'로 변경"
 }

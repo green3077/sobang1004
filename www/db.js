@@ -130,6 +130,23 @@ const FireDB = (() => {
     return { ...def, beforePhotoIds: def.beforePhotoIds || [], afterPhotoIds: def.afterPhotoIds || [] };
   }
 
+  // inspections.photoIds도 같은 이유(빈 배열이 저장되지 않음)로 문제가 되는데, 여기는 한 가지가
+  // 더 있다 - 점검 회차 자체는 이 사진-동기화 기능이 생기기 훨씬 전부터 있던 오래된 데이터라,
+  // "photoIds가 없다"가 "이 기능 이전이라 애초에 추적 안 함"인지 "사진을 다 지워서 마지막
+  // 하나까지 없어진 빈 배열"인지 읽을 때는 구분이 안 간다(둘 다 키 자체가 없는 것으로 보임).
+  // 앞의 경우는 손대면 안 되고(추적 안 하던 사진을 실수로 지울 위험), 뒤의 경우는 빈 배열로
+  // 취급해야 삭제가 다른 기기에 제대로 반영된다. 그래서 사진을 올리거나 지울 때마다
+  // photoSyncEnabled를 true로 같이 남겨둔다(불리언 true는 지워지지 않으므로) - 이 값이 있으면
+  // "이 회차는 이미 새 방식으로 추적 중"이라는 뜻이라 photoIds가 비어 보여도 안심하고 빈
+  // 배열로 취급할 수 있다.
+  function normalizeInspection(insp) {
+    if (!insp) return null;
+    if (insp.photoSyncEnabled || Array.isArray(insp.photoIds)) {
+      return { ...insp, photoIds: insp.photoIds || [] };
+    }
+    return insp;
+  }
+
   // 주의: Firebase Realtime Database는 빈 배열([])을 저장하지 않고 그냥 키 자체를 지워버린다
   // (siteIds가 전부 지워진 날짜를 다시 읽으면 siteIds 필드가 아예 없이 돌아온다) - 그래서
   // 스케줄을 읽을 때마다 normalizeSchedule로 항상 실제 배열을 보장해준다.
@@ -207,8 +224,8 @@ const FireDB = (() => {
       }
       return fbRemove(`inspections/${id}`);
     },
-    getInspection: (id) => fbGet(`inspections/${id}`),
-    getAllInspections: () => fbGetAll("inspections"),
+    getInspection: async (id) => normalizeInspection(await fbGet(`inspections/${id}`)),
+    getAllInspections: async () => (await fbGetAll("inspections")).map(normalizeInspection),
     getInspectionsBySite: async (siteId) => (await fbGetAll("inspections")).filter((i) => i.siteId === siteId),
 
     // Photos (이 기기에만 저장 - 아직 공유 저장소로 옮기기 전)

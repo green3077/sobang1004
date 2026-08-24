@@ -1720,7 +1720,7 @@
         const insp = await FireDB.getInspection(galleryActiveInspectionId);
         if (insp) {
           const photoIds = Array.from(new Set([...(insp.photoIds || []), ...newIds]));
-          await FireDB.updateInspection(galleryActiveInspectionId, { photoIds });
+          await FireDB.updateInspection(galleryActiveInspectionId, { photoIds, photoSyncEnabled: true });
         }
       }
     } finally {
@@ -1820,17 +1820,17 @@
     // 알고 있는 실제 남은 목록으로 채워서, 이후로는 다른 기기가 이미 내려받아 갖고 있던
     // 사본도 다음에 열 때 loadGalleryPhotos의 정리 로직으로 같이 지워지게 한다.
     const remaining = galleryPhotos.filter((ph) => ph.id !== p.id).map((ph) => ph.id);
-    await FireDB.updateInspection(galleryActiveInspectionId, { photoIds: remaining });
+    await FireDB.updateInspection(galleryActiveInspectionId, { photoIds: remaining, photoSyncEnabled: true });
     await loadGalleryPhotos();
   });
 
   $("#btnCompleteSiteVisit").addEventListener("click", async () => {
-    const ok = await confirmDialog("오늘 방문을 완료 처리할까요? (마지막 점검일이 갱신됩니다)");
+    const ok = await confirmDialog("오늘 점검을 완료 처리할까요? (마지막 점검일이 갱신됩니다)");
     if (!ok || !galleryActiveInspectionId) return;
     const insp = await FireDB.getInspection(galleryActiveInspectionId);
     await FireDB.updateInspection(galleryActiveInspectionId, { status: "completed", completedDate: todayISO() });
     if (insp) await ensureDeficiencyRoundForDate(insp.siteId, insp.scheduledDate);
-    toast("방문이 완료 처리되었습니다.", "success");
+    toast("점검이 완료 처리되었습니다.", "success");
     await openInspectionDetail(galleryActiveInspectionId);
   });
 
@@ -3136,8 +3136,8 @@
   // 확인 필요), 새 버전이 있으면 외부 브라우저로 APK 다운로드 URL을 열어 다운로드->설치를 대신 시작해준다.
   // version.js의 APP_VERSION은 마지막으로 웹 파일이 바뀐 실제 날짜/시간(한국시간)이고,
   // APP_VERSION_CODE/NAME은 APK를 새로 빌드해서 배포할 때만 올리는 별개의 버전 번호다.
-  const APP_VERSION_CODE = 35;
-  const APP_VERSION_NAME = "1.34";
+  const APP_VERSION_CODE = 36;
+  const APP_VERSION_NAME = "1.35";
   const UPDATE_MANIFEST_URL = "https://green3077.github.io/sobang1004/version.json";
   const IS_NATIVE_UPDATE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
   // 이 프로젝트는 번들러(webpack/vite 등)를 쓰지 않는 순수 스크립트 앱이라 @capacitor/core 전체가
