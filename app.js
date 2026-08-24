@@ -1032,7 +1032,6 @@
         contactName: "siteContactName", contactPhone: "siteContactPhone",
         fireManagerName: "siteFireManagerName", fireManagerPhone: "siteFireManagerPhone",
         fireManagerAppointDate: "siteFireManagerAppointDate", fireManagerEduDate: "siteFireManagerEduDate",
-        engineerName: "siteEngineerName", engineerPhone: "siteEngineerPhone",
         receiverLocation: "siteReceiverLocation", pumpRoomLocation: "sitePumpRoomLocation",
         area: "siteArea", approvalDate: "siteApprovalDate", floorInfo: "siteFloorInfo",
         buildingType: "siteBuildingType"
@@ -3262,6 +3261,24 @@
     return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }
 
+  // 법정 공휴일(대체공휴일 포함) - 설날/추석/부처님오신날처럼 음력 기준이라 해마다 날짜가 달라지는
+  // 공휴일은 계산으로 구할 수 없어 연도별로 직접 채워둔다. 여기 없는 연도(2028년 이후 등)는
+  // 달력에 공휴일 빨간색 표시만 안 될 뿐 나머지 기능에는 영향이 없다 - 해가 바뀌면 이 목록을 갱신한다.
+  const KR_HOLIDAYS = new Set([
+    // 2025
+    "2025-01-01", "2025-01-28", "2025-01-29", "2025-01-30", "2025-03-03",
+    "2025-05-05", "2025-06-06", "2025-08-15", "2025-10-03", "2025-10-06",
+    "2025-10-07", "2025-10-08", "2025-10-09", "2025-12-25",
+    // 2026
+    "2026-01-01", "2026-02-16", "2026-02-17", "2026-02-18", "2026-03-02",
+    "2026-05-05", "2026-05-25", "2026-06-06", "2026-07-17", "2026-08-17",
+    "2026-09-24", "2026-09-25", "2026-09-26", "2026-10-05", "2026-10-09", "2026-12-25",
+    // 2027
+    "2027-01-01", "2027-02-06", "2027-02-08", "2027-02-09", "2027-03-01",
+    "2027-05-05", "2027-05-13", "2027-06-06", "2027-07-19", "2027-08-16",
+    "2027-09-14", "2027-09-15", "2027-09-16", "2027-10-04", "2027-10-11", "2027-12-25"
+  ]);
+
   async function renderScheduleCalendar() {
     const year = scheduleCalDate.getFullYear();
     const month = scheduleCalDate.getMonth();
@@ -3280,16 +3297,22 @@
     }
     for (let day = 1; day <= daysInMonth; day++) {
       const dateStr = scheduleDateStr(year, month, day);
+      const weekday = new Date(year, month, day).getDay();
       const sched = scheduleMap.get(dateStr);
       const count = sched ? sched.siteIds.length : 0;
+      // 셀 배경(회색/파랑/노랑)은 그날의 방문 일정 상태를, 날짜 숫자 색(파랑/빨강)은 요일·공휴일을
+      // 나타낸다 - 서로 다른 정보라서 겹쳐도 각자 구분되게 클래스를 따로 둔다.
       const classes = ["schedule-day-cell"];
       if (count > 0) classes.push("has-schedule");
       if (sched && sched.confirmed) classes.push("is-confirmed");
       if (dateStr === today) classes.push("is-today");
       if (dateStr === scheduleSelectedDate) classes.push("is-selected");
+      const numClasses = ["schedule-day-num"];
+      if (weekday === 6) numClasses.push("is-sat");
+      if (weekday === 0 || KR_HOLIDAYS.has(dateStr)) numClasses.push("is-sun");
       cellsHtml += `
         <div class="${classes.join(" ")}" data-date="${dateStr}">
-          <span>${day}</span>
+          <span class="${numClasses.join(" ")}">${day}</span>
           ${count > 0 ? `<span class="schedule-day-count">${count}곳</span>` : ""}
         </div>
       `;

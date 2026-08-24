@@ -297,10 +297,12 @@ const FireDB = (() => {
       if (!siteIds.includes(siteId)) siteIds.push(siteId);
       return fbSet(`schedules/${date}`, { id: date, siteIds, confirmed: existing ? existing.confirmed : false });
     },
+    // 업체를 하나라도 빼면 그날 "확정"은 더 이상 맞지 않으므로 같이 취소한다 - 확정은 그 시점에
+    // 저장된 업체 목록 전체를 방문하기로 확정했다는 뜻이라, 목록이 바뀌면 다시 확인 후 확정해야 한다.
     async removeSiteFromSchedule(date, siteId) {
       const existing = await getScheduleByDate(date);
       if (!existing) return null;
-      return fbSet(`schedules/${date}`, { ...existing, siteIds: existing.siteIds.filter((id) => id !== siteId) });
+      return fbSet(`schedules/${date}`, { ...existing, siteIds: existing.siteIds.filter((id) => id !== siteId), confirmed: false });
     },
     async setScheduleSiteIds(date, siteIds) {
       const existing = await getScheduleByDate(date);

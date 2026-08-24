@@ -19,6 +19,13 @@
   --warn-bg: #fbf0d9;
   --neutral-bg: #eceef0;
   --border: #e1dccf;
+  /* 스케줄 달력 전용 - 확정(밝은 노랑) / 예정(노랑의 보색인 파랑) / 일정없음(회색) */
+  --sched-none-bg: #dfe2e6;
+  --sched-pending-bg: #dde5ff;
+  --sched-pending: #33459e;
+  --sched-confirmed-bg: #ffe14d;
+  --sched-confirmed: #7a5c00;
+  --sched-sat: #2f6fed;
 }
 body {
   margin: 0;
@@ -548,18 +555,26 @@ input[readonly] { background: var(--neutral-bg); color: var(--text-dim); }
   aspect-ratio: 1;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   border-radius: 10px; cursor: pointer; font-size: 14px; font-weight: 700; color: var(--text);
-  background: var(--neutral-bg); border: 2px solid transparent;
+  background: var(--sched-none-bg); border: 2px solid transparent;
 }
 .schedule-day-cell.is-empty { visibility: hidden; cursor: default; }
-.schedule-day-cell.has-schedule { background: #dce9f6; }
-.schedule-day-cell.is-confirmed { background: var(--warn-bg); color: var(--warn); }
+.schedule-day-cell.has-schedule { background: var(--sched-pending-bg); color: var(--sched-pending); }
+.schedule-day-cell.is-confirmed { background: var(--sched-confirmed-bg); color: var(--sched-confirmed); }
 .schedule-day-cell.is-today { border-color: var(--gold); }
 .schedule-day-cell.is-selected { border-color: var(--accent); }
 .schedule-day-count { font-size: 10.5px; font-weight: 700; margin-top: 1px; }
-.schedule-legend { display: flex; gap: 16px; margin-top: 10px; font-size: 13px; color: var(--text-dim); }
+/* 날짜 숫자 색은 셀 배경(방문 일정 상태)과 별개로 요일/공휴일을 나타낸다 - 자식 요소에
+   직접 색을 지정해서 위 .schedule-day-cell 계열 배경색 규칙에 덮이지 않게 한다. */
+.schedule-day-num.is-sat { color: var(--sched-sat); }
+.schedule-day-num.is-sun { color: var(--danger); }
+.schedule-legend { display: flex; gap: 16px; margin-top: 10px; font-size: 13px; color: var(--text-dim); flex-wrap: wrap; }
 .schedule-legend-item { display: flex; align-items: center; gap: 6px; }
-.schedule-legend-dot { width: 12px; height: 12px; border-radius: 50%; background: #dce9f6; display: inline-block; }
-.schedule-legend-dot-confirmed { background: var(--warn-bg); border: 2px solid var(--warn); }
+.schedule-legend-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--sched-pending-bg); border: 2px solid var(--sched-pending); display: inline-block; }
+.schedule-legend-dot-confirmed { background: var(--sched-confirmed-bg); border: 2px solid var(--sched-confirmed); }
+.schedule-legend-dot-none { background: var(--sched-none-bg); border: 2px solid var(--text-dim); }
+.schedule-legend-text { font-weight: 800; }
+.schedule-legend-text.is-sat { color: var(--sched-sat); }
+.schedule-legend-text.is-sun { color: var(--danger); }
 
 .schedule-selected-date { font-size: 17px; font-weight: 800; color: var(--accent-dark); margin-bottom: 10px; }
 .schedule-day-company-list { margin-bottom: 12px; }
