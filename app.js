@@ -1219,6 +1219,48 @@
 
   let lastAutoBldRegAddress = "";
 
+  // 지상/지하 최고 층수를 "지상 n층 / 지하 n층" 텍스트로 - 지하는 0층(=지하 없음)이면 "지하 0층"이
+  // 아니라 "지하 -"로 표시한다.
+  function floorRangeText(max, label) {
+    if (max == null) return "";
+    return label === "지하" && max === 0 ? "지하 -" : `${label} ${max}층`;
+  }
+  function formatApprovalDate(raw) {
+    return /^\d{8}$/.test(raw || "") ? `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}` : (raw || "");
+  }
+
+  // 거래처명이 "OO상가1"처럼 "상가" 뒤에 번호가 붙어 있으면, 표제부(대지 내 모든 동)에서 동명칭에
+  // "상가"와 그 번호가 함께 들어간 동 하나를 찾아 그 동의 주용도/연면적/층수를 그대로 가져온다
+  // (여러 동을 합치지 않음 - 사용자 요청). "상가" 뒤에 번호가 없으면 "상가"만 포함된 동으로 찾는다.
+  async function lookupShoppingCenterBldReg(siteName, address, resultBox) {
+    const numMatch = siteName.match(/상가\s*(\d+)/);
+    const number = numMatch ? numMatch[1] : null;
+    const result = await BldReg.lookupShoppingDong(address, number);
+    const item = result.item;
+    if (!item) {
+      resultBox.innerHTML = `<div class="bldreg-error">표제부에서 동명칭에 "상가"가 포함된 동을 찾지 못했습니다. 건물명·주소를 확인하거나 직접 입력해주세요.</div>`;
+      return;
+    }
+    const floorInfo = [floorRangeText(item.grndFlrCnt ? parseInt(item.grndFlrCnt, 10) : null, "지상"), floorRangeText(item.ugrndFlrCnt ? parseInt(item.ugrndFlrCnt, 10) : null, "지하")].filter(Boolean).join(" / ");
+    const fetched = {
+      buildingType: item.mainPurpsCdNm || "",
+      area: item.totArea || "",
+      floorInfo
+    };
+    if (fetched.buildingType) $("#siteBuildingType").value = fetched.buildingType;
+    if (fetched.area) $("#siteArea").value = fetched.area;
+    if (fetched.floorInfo) $("#siteFloorInfo").value = fetched.floorInfo;
+    resultBox.innerHTML = `
+      <div class="report-meta-row"><span class="label">대장구분</span><span>표제부 (상가${number ? " " + escapeHtml(number) : ""})</span></div>
+      <div class="report-meta-row"><span class="label">동명칭</span><span>${escapeHtml(item.dongNm || "-")}</span></div>
+      <div class="report-meta-row"><span class="label">주용도</span><span>${escapeHtml(fetched.buildingType || "-")}</span></div>
+      <div class="report-meta-row"><span class="label">연면적</span><span>${escapeHtml(fetched.area ? fetched.area + " ㎡" : "-")}</span></div>
+      <div class="report-meta-row"><span class="label">층수</span><span>${escapeHtml(fetched.floorInfo || "-")}</span></div>
+      <div class="hint-text">거래처명의 "상가${number ? number : ""}"와 동명칭이 일치하는 동의 정보를 불러왔습니다. 내용이 다르면 직접 수정해주세요.</div>
+    `;
+    toast("표제부에서 해당 상가 동 정보를 불러왔습니다.");
+  }
+
   async function lookupBldRegForCurrentAddress() {
     const address = $("#siteAddress").value.trim();
     const resultBox = $("#bldRegResult");
@@ -1232,6 +1274,11 @@
     resultBox.classList.remove("hidden");
     resultBox.innerHTML = `<div class="report-meta-row"><span class="label">상태</span><span>건축물대장 조회 중...</span></div>`;
     try {
+      const siteName = $("#siteName").value.trim();
+      if (siteName.includes("상가")) {
+        await lookupShoppingCenterBldReg(siteName, address, resultBox);
+        return;
+      }
       const { item, source, floorSummary } = await BldReg.lookup(address);
       if (!item) {
         resultBox.innerHTML = `<div class="bldreg-error">해당 주소의 건축물대장을 찾지 못했습니다. 주소를 정확히 입력했는지 확인하거나 직접 입력해주세요.</div>`;
@@ -1241,11 +1288,9 @@
       // 총괄표제부는 대지 전체 집계값(연면적 등)만 갖고 동별 층수/구조는 없다 - 이 경우
       // floorSummary(대지 내 모든 동의 표제부에서 집계)로 층수/구조를 채운다.
       // 동마다 층수가 달라도(floorSummary) 범위 대신 그중 가장 높은 층수만 표시.
-      // 지하는 0층(=지하 없음)이면 "지하 0층"이 아니라 "지하 -"로 표시.
-      const floorText = (max, label) => (max == null ? "" : label === "지하" && max === 0 ? "지하 -" : `${label} ${max}층`);
-      let floorInfo = [floorText(item.grndFlrCnt ? parseInt(item.grndFlrCnt, 10) : null, "지상"), floorText(item.ugrndFlrCnt ? parseInt(item.ugrndFlrCnt, 10) : null, "지하")].filter(Boolean).join(" / ");
+      let floorInfo = [floorRangeText(item.grndFlrCnt ? parseInt(item.grndFlrCnt, 10) : null, "지상"), floorRangeText(item.ugrndFlrCnt ? parseInt(item.ugrndFlrCnt, 10) : null, "지하")].filter(Boolean).join(" / ");
       if (!floorInfo && floorSummary) {
-        floorInfo = [floorText(floorSummary.grndMax, "지상"), floorText(floorSummary.ugrndMax, "지하")].filter(Boolean).join(" / ");
+        floorInfo = [floorRangeText(floorSummary.grndMax, "지상"), floorRangeText(floorSummary.ugrndMax, "지하")].filter(Boolean).join(" / ");
       }
       let structure = item.strctCdNm || "";
       if (!structure && floorSummary && floorSummary.structures.length) {
@@ -1255,7 +1300,7 @@
         buildingType: item.mainPurpsCdNm || "",
         area: item.totArea || "",
         floorInfo,
-        approvalDate: /^\d{8}$/.test(rawApprovalDate) ? `${rawApprovalDate.slice(0, 4)}-${rawApprovalDate.slice(4, 6)}-${rawApprovalDate.slice(6, 8)}` : rawApprovalDate,
+        approvalDate: formatApprovalDate(rawApprovalDate),
         structure
       };
       // 건축물대장이 실제로 값을 준 항목만 덮어쓴다 - 특정 항목을 비워서 응답하면(예: 연면적 "-")
