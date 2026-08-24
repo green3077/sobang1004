@@ -3428,10 +3428,16 @@
     if (siteIds.length === 0) {
       list.innerHTML = `<div class="empty-state">아래 업체 목록에서 선택 후 "확인"을 누르면 여기에 표시됩니다.</div>`;
     } else {
-      list.innerHTML = siteIds.map((id) => `
+      // 방문 순서(번호)를 직접 매길 수 있게 ▲▼로 배열 순서를 바꾼다 - 하루에 여러 업체를 도는 경우
+      // 실제로 돌 순서대로 정렬해두면 편하다(사용자 요청). 순서는 siteIds 배열 순서 그대로.
+      list.innerHTML = siteIds.map((id, idx) => `
         <div class="schedule-day-company-chip">
-          <span>${escapeHtml(siteMap.has(id) ? siteMap.get(id).name : "삭제된 업체")}</span>
-          <button type="button" data-remove="${id}">×</button>
+          <div class="schedule-day-company-reorder">
+            <button type="button" class="schedule-reorder-btn" data-move="up" data-idx="${idx}" ${idx === 0 ? "disabled" : ""}>▲</button>
+            <button type="button" class="schedule-reorder-btn" data-move="down" data-idx="${idx}" ${idx === siteIds.length - 1 ? "disabled" : ""}>▼</button>
+          </div>
+          <span class="schedule-day-company-name">${idx + 1}. ${escapeHtml(siteMap.has(id) ? siteMap.get(id).name : "삭제된 업체")}</span>
+          <button type="button" class="schedule-day-company-remove" data-remove="${id}">×</button>
         </div>
       `).join("");
       $$("#scheduleDayCompanyList [data-remove]").forEach((btn) => {
@@ -3441,6 +3447,17 @@
           scheduleStagedIds.delete(id);
           await refreshScheduleManage();
           toast("삭제했습니다.");
+        });
+      });
+      $$("#scheduleDayCompanyList [data-move]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const idx = parseInt(btn.dataset.idx, 10);
+          const newIdx = idx + (btn.dataset.move === "up" ? -1 : 1);
+          if (newIdx < 0 || newIdx >= siteIds.length) return;
+          const reordered = siteIds.slice();
+          [reordered[idx], reordered[newIdx]] = [reordered[newIdx], reordered[idx]];
+          await FireDB.setScheduleSiteIds(date, reordered);
+          await renderScheduleDayDetail();
         });
       });
     }

@@ -576,11 +576,18 @@ input[readonly] { background: var(--neutral-bg); color: var(--text-dim); }
 .schedule-selected-date { font-size: 17px; font-weight: 800; color: var(--accent-dark); margin-bottom: 10px; }
 .schedule-day-company-list { margin-bottom: 12px; }
 .schedule-day-company-chip {
-  display: flex; align-items: center; justify-content: space-between;
-  background: var(--gold-bg); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px;
+  display: flex; align-items: center; gap: 8px;
+  background: var(--gold-bg); border-radius: 10px; padding: 8px 12px; margin-bottom: 8px;
   font-size: 15px; font-weight: 700; color: var(--accent-dark);
 }
-.schedule-day-company-chip button {
+.schedule-day-company-reorder { display: flex; flex-direction: column; gap: 1px; }
+.schedule-reorder-btn {
+  border: none; background: none; color: var(--accent-dark); font-size: 12px; line-height: 1;
+  cursor: pointer; padding: 3px 5px; font-family: inherit;
+}
+.schedule-reorder-btn:disabled { color: var(--border); cursor: default; }
+.schedule-day-company-name { flex: 1; min-width: 0; }
+.schedule-day-company-remove {
   border: none; background: none; color: var(--danger); font-size: 18px; font-weight: 800;
   cursor: pointer; padding: 0 4px; font-family: inherit;
 }
