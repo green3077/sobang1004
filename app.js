@@ -9,6 +9,9 @@
   let pendingAttachments = [];   // 신규 현장 등록 시 아직 저장 전인 첨부파일 (저장 시점에 실제 siteId로 옮겨 담음)
   let sitesSortMode = "name";    // "name"(가나다순) | "region"(지역별) - 거래처 목록 정렬 방식
   let sitesSelectedRegion = null; // 지역별 모드에서 드릴다운한 지역 (구/도 이름), null이면 지역 버튼 목록 표시 중
+  // "이번달" 필터 - 정렬 방식과 별개로 켜고 끌 수 있는 토글. "거래처 관리"(등록 화면 아래 목록)와
+  // "점검팀"(거래처 목록) 두 화면이 이 상태를 공유한다 - 같은 거래처 목록을 보여주는 화면이라서.
+  let sitesMonthOnly = false;
   let defSortMode = "name";      // 지적사항 허브(업체별) 정렬 방식, 거래처 목록과 동일한 개념
   let defSelectedRegion = null;
   let defFilters = new Set();    // 지적사항 허브 상태 필터: "pending"|"none"|"open"|"resolved" 중 선택된 것들 (OR 조건)
@@ -379,6 +382,14 @@
     return "작동점검";
   }
 
+  // "이번달" 필터 - 이번 달이 그 현장의 종합점검월 또는 작동점검월과 같으면 true.
+  function isSiteInCurrentMonth(site) {
+    const sched = computeInspectionMonths(site);
+    if (!sched) return false;
+    const month = new Date().getMonth() + 1;
+    return sched.comprehensiveMonth === month || sched.operationalMonth === month;
+  }
+
   function showScreen(id) {
     $$(".screen").forEach((s) => s.classList.remove("active"));
     $("#" + id).classList.add("active");
@@ -481,7 +492,11 @@
       $("#btnHeaderBack").click();
     });
   }
-  $("#btnHomeAddSite").addEventListener("click", () => $("#btnAddSite").click());
+  // "거래처 관리" 홈 타일 - 등록 방법 선택 화면을 열면서, 그 아래 기존 거래처 목록도 같이 보여준다.
+  $("#btnHomeAddSite").addEventListener("click", () => {
+    renderEntrySites().catch(reportLoadFailure);
+    showScreen("screen-site-entry-choice");
+  });
   // "점검팀" 홈 타일 - 기존 "거래처 보기"와 같은 화면(거래처 목록)을 그대로 연다.
   $("#btnHomeViewSites").addEventListener("click", () => { renderSites(); showScreen("screen-sites"); });
   // "공사팀" 홈 타일 - 더 이상 공사팀 화면으로 가지 않고, 지적사항 메뉴를 바로 연다(사용자 요청).
@@ -640,19 +655,19 @@
     bindSiteCardClicks(list);
   }
 
-  function renderSitesByRegion(sites, lastBySite) {
-    const list = $("#sitesList");
-
+  // list/rerender를 인자로 받아서 "거래처 관리"(entrySitesList)와 "점검팀"(sitesList) 두 화면이
+  // 정렬 상태(sitesSortMode/sitesSelectedRegion)를 공유하면서도 각자의 DOM에 그릴 수 있게 한다.
+  function renderSitesByRegion(sites, lastBySite, list, rerender) {
     if (sitesSelectedRegion) {
       const filtered = sites.filter((s) => classifyRegion(s.address) === sitesSelectedRegion);
-      const backBtnHtml = `<button class="btn btn-secondary region-back-row" id="btnBackToRegionList">← 지역 목록으로 (${escapeHtml(sitesSelectedRegion)})</button>`;
+      const backBtnHtml = `<button class="btn btn-secondary region-back-row" type="button">← 지역 목록으로 (${escapeHtml(sitesSelectedRegion)})</button>`;
       if (filtered.length === 0) {
         list.innerHTML = `${backBtnHtml}<div class="empty-state">이 지역에 등록된 현장이 없습니다.</div>`;
       } else {
         list.innerHTML = backBtnHtml + filtered.map((s) => siteCardHtml(s, lastBySite)).join("");
         bindSiteCardClicks(list);
       }
-      $("#btnBackToRegionList").addEventListener("click", () => { sitesSelectedRegion = null; renderSites(); });
+      list.querySelector(".region-back-row").addEventListener("click", () => { sitesSelectedRegion = null; rerender(); });
       return;
     }
 
@@ -675,7 +690,7 @@
       </button>
     `).join("")}</div>`;
     Array.from(list.querySelectorAll(".region-btn")).forEach((btn) => {
-      btn.addEventListener("click", () => { sitesSelectedRegion = btn.dataset.region; renderSites(); });
+      btn.addEventListener("click", () => { sitesSelectedRegion = btn.dataset.region; rerender(); });
     });
   }
 
@@ -692,17 +707,27 @@
     return lastBySite;
   }
 
-  async function renderSites() {
-    const [sites, inspections] = await Promise.all([FireDB.getAllSites(), FireDB.getAllInspections()]);
-    sites.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  // 거래처 목록 렌더링 본체 - listElId/summaryElId/toolbarIds만 다르면 "거래처 관리" 화면 아래 목록과
+  // "점검팀" 화면 둘 다 이 함수 하나로 그린다(정렬/지역/이번달 상태는 공유).
+  async function renderSiteListInto(listElId, summaryElId, toolbarIds) {
+    $("#" + toolbarIds.name).classList.toggle("active", sitesSortMode === "name");
+    $("#" + toolbarIds.region).classList.toggle("active", sitesSortMode === "region");
+    $("#" + toolbarIds.month).classList.toggle("active", sitesMonthOnly);
+
+    const [allSites, inspections] = await Promise.all([FireDB.getAllSites(), FireDB.getAllInspections()]);
+    allSites.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+    const sites = sitesMonthOnly ? allSites.filter(isSiteInCurrentMonth) : allSites;
 
     const lastBySite = computeLastInspectionBySite(inspections);
 
-    const list = $("#sitesList");
-    const summary = $("#sitesSummary");
+    const list = $("#" + listElId);
+    const summary = $("#" + summaryElId);
+    const rerender = () => renderSiteListInto(listElId, summaryElId, toolbarIds);
     if (sites.length === 0) {
       summary.textContent = "";
-      list.innerHTML = `<div class="empty-state">등록된 현장이 없습니다.<br>현장을 추가해 점검을 시작하세요.</div>`;
+      list.innerHTML = sitesMonthOnly
+        ? `<div class="empty-state">이번 달 종합점검/작동점검 대상 거래처가 없습니다.</div>`
+        : `<div class="empty-state">등록된 현장이 없습니다.<br>현장을 추가해 점검을 시작하세요.</div>`;
       return;
     }
 
@@ -714,26 +739,42 @@
         const regionCount = new Set(sites.map((s) => classifyBroadRegion(s.address))).size;
         summary.innerHTML = `전체 <strong>${sites.length}개</strong> 거래처 · ${regionCount}개 지역`;
       }
-      renderSitesByRegion(sites, lastBySite);
+      renderSitesByRegion(sites, lastBySite, list, rerender);
       return;
     }
     summary.innerHTML = `전체 <strong>${sites.length}개</strong> 거래처`;
     renderSiteCardsInto(list, sites, lastBySite, "등록된 현장이 없습니다.");
   }
 
-  $("#btnSortByName").addEventListener("click", () => {
-    sitesSortMode = "name";
-    sitesSelectedRegion = null;
-    $("#btnSortByName").classList.add("active");
-    $("#btnSortByRegion").classList.remove("active");
-    renderSites();
-  });
-  $("#btnSortByRegion").addEventListener("click", () => {
-    sitesSortMode = "region";
-    $("#btnSortByRegion").classList.add("active");
-    $("#btnSortByName").classList.remove("active");
-    renderSites();
-  });
+  const SITES_TOOLBAR_IDS = { name: "btnSortByName", region: "btnSortByRegion", month: "btnFilterThisMonth" };
+  const ENTRY_SITES_TOOLBAR_IDS = { name: "btnEntrySortByName", region: "btnEntrySortByRegion", month: "btnEntryFilterThisMonth" };
+
+  function renderSites() {
+    return renderSiteListInto("sitesList", "sitesSummary", SITES_TOOLBAR_IDS);
+  }
+  function renderEntrySites() {
+    return renderSiteListInto("entrySitesList", "entrySitesSummary", ENTRY_SITES_TOOLBAR_IDS);
+  }
+
+  // 가나다순/지역별/이번달 툴바 버튼 3개를 한 화면분 통째로 연결한다 - "거래처 관리"/"점검팀" 두
+  // 화면이 각자의 버튼 id만 다르고 나머지 동작은 동일해서 이 함수 하나로 양쪽을 다 연결한다.
+  function wireSiteSortToolbar(toolbarIds, renderFn) {
+    $("#" + toolbarIds.name).addEventListener("click", () => {
+      sitesSortMode = "name";
+      sitesSelectedRegion = null;
+      renderFn();
+    });
+    $("#" + toolbarIds.region).addEventListener("click", () => {
+      sitesSortMode = "region";
+      renderFn();
+    });
+    $("#" + toolbarIds.month).addEventListener("click", () => {
+      sitesMonthOnly = !sitesMonthOnly;
+      renderFn();
+    });
+  }
+  wireSiteSortToolbar(SITES_TOOLBAR_IDS, renderSites);
+  wireSiteSortToolbar(ENTRY_SITES_TOOLBAR_IDS, renderEntrySites);
 
   // 방문 예약/이력(일정관리, 오늘의 할일, 마지막 점검일) 트리거 - "점검하기" 버튼을 누르면 그 날짜로
   // 점검 기록을 하나 만들고(같은 날짜가 이미 있으면 그걸 재사용), 점검 이력 목록에 날짜별 탭으로 쌓인다.
@@ -932,8 +973,9 @@
     toast(`${files.length}개 자료를 첨부했습니다.`);
   });
 
-  $("#btnAddSite").addEventListener("click", () => showScreen("screen-site-entry-choice"));
-  $("#btnCancelEntryChoice").addEventListener("click", () => { renderSites(); showScreen("screen-sites"); });
+  // "취소"/헤더 뒤로가기 - 예전엔 거래처 목록 화면(screen-sites)으로 건너뛰었는데, 이제 이 화면
+  // 자체에 거래처 목록이 있으니 그냥 원래 있던 화면(홈)으로 돌아간다(사용자 요청: 이전 페이지로만).
+  $("#btnCancelEntryChoice").addEventListener("click", goHome);
   $("#btnEntryManual").addEventListener("click", openBlankSiteForm);
   $("#btnEntryImport").addEventListener("click", () => $("#clientImportInput").click());
 
