@@ -1,6 +1,6 @@
 {
-  "versionCode": 37,
-  "versionName": "1.36",
+  "versionCode": 38,
+  "versionName": "1.37",
   "apkUrl": "https://green3077.github.io/sobang1004/fire-inspection.apk",
-  "notes": "일정관리 화면에서 설명 문구와 날짜별 상세/동선 섹션 제거"
+  "notes": "일정관리에 '오늘의 점검현황'(스케줄 순서대로, 그 자리에서 점검완료 처리) 추가, 근처 맛집 추천(카카오 로컬 API, 설정 탭에서 키 등록 필요) 추가"
 }

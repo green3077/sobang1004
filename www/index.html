@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>소방점검 관리</title>
 <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-<link rel="stylesheet" href="style.css?v=20260825-0047">
+<link rel="stylesheet" href="style.css?v=20260825-0111">
 </head>
 <body>
 <!-- 스크립트 실행 도중 어디선가 예외가 나면 그 뒤의 코드(버튼 연결 등)가 통째로 실행되지
@@ -406,6 +406,15 @@
       <h2>일정관리</h2>
     </div>
     <div id="scheduleAgenda"></div>
+    <div class="card">
+      <h2>오늘의 점검현황</h2>
+      <div class="hint-text">스케줄 관리에서 정한 순서대로 표시됩니다.</div>
+    </div>
+    <div id="inspectionStatusList"></div>
+    <div class="card">
+      <h2>🍽️ 근처 맛집 추천</h2>
+    </div>
+    <div id="nearbyRestaurants"></div>
   </section>
 
   <!-- 스케줄 관리 (날짜별 방문 예정/확정 업체) -->
@@ -488,6 +497,12 @@
       <button class="btn btn-secondary" id="btnSaveApiKeys">API 키 저장</button>
     </div>
     <div class="card">
+      <h2>🍽️ 맛집 추천 API 키</h2>
+      <div class="hint-text">일정관리 화면의 "근처 맛집 추천"에 사용됩니다. developers.kakao.com에서 애플리케이션을 만들면 무료로 REST API 키를 즉시 발급받을 수 있습니다.</div>
+      <div class="field"><span>카카오 REST API 키</span><input type="text" id="kakaoApiKey" placeholder="developers.kakao.com에서 발급"></div>
+      <button class="btn btn-secondary" id="btnSaveKakaoKey">저장</button>
+    </div>
+    <div class="card">
       <h2>☁️ 구글 드라이브 자동 저장</h2>
       <div class="hint-text">업로드하는 자료(거래처 등록 파일, 지적사항 자료, 사진, 첨부파일)와 생성되는 이행완료보고서가 회사 구글 드라이브의 "조은소방_자동저장" 폴더에 현장별로 자동 저장됩니다. 별도 로그인 없이, 이 앱을 사용하는 누구의 업로드든 같은 곳에 모입니다.</div>
       <label class="setting-toggle-row">
@@ -551,16 +566,17 @@
      사진이 이상하게 나온다"는, 이미 고쳐서 배포한 버그를 PC에서만 계속 겪은 원인이었다) - 배포마다
      이 값을 version.js의 APP_VERSION과 함께 갱신해야 한다. -->
 <script src="firebase-config.js"></script>
-<script src="version.js?v=20260825-0047"></script>
-<script src="auth.js?v=20260825-0047"></script>
-<script src="db.js?v=20260825-0047"></script>
-<script src="ui.js?v=20260825-0047"></script>
-<script src="import.js?v=20260825-0047"></script>
-<script src="client-import.js?v=20260825-0047"></script>
-<script src="bldreg.js?v=20260825-0047"></script>
-<script src="ai-fill.js?v=20260825-0047"></script>
-<script src="hwpx-export.js?v=20260825-0047"></script>
-<script src="drive.js?v=20260825-0047"></script>
-<script src="app.js?v=20260825-0047"></script>
+<script src="version.js?v=20260825-0111"></script>
+<script src="auth.js?v=20260825-0111"></script>
+<script src="db.js?v=20260825-0111"></script>
+<script src="ui.js?v=20260825-0111"></script>
+<script src="import.js?v=20260825-0111"></script>
+<script src="client-import.js?v=20260825-0111"></script>
+<script src="bldreg.js?v=20260825-0111"></script>
+<script src="kakao-local.js?v=20260825-0111"></script>
+<script src="ai-fill.js?v=20260825-0111"></script>
+<script src="hwpx-export.js?v=20260825-0111"></script>
+<script src="drive.js?v=20260825-0111"></script>
+<script src="app.js?v=20260825-0111"></script>
 </body>
 </html>

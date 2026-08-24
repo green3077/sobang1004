@@ -3018,6 +3018,108 @@
 
   async function renderRoute() {
     await renderScheduleAgenda();
+    await renderInspectionStatus();
+    await renderNearbyRestaurants();
+  }
+
+  // 오늘의 점검현황 - "스케줄 관리"에서 정한 오늘 방문 순서(schedules/오늘날짜.siteIds) 그대로
+  // 보여주고, 그 자리에서 바로 "점검완료"를 누를 수 있게 한다. 완료 여부는 그 업체의 오늘 날짜
+  // 점검 회차(inspections, scheduledDate가 오늘인 것)가 있는지/완료 상태인지로 판단한다 - 아직
+  // 회차가 없으면(점검 시작 전) "예정"으로 보이고, "점검완료"를 누르면 회차를 새로 만들면서
+  // 동시에 완료 처리한다(체크리스트/사진을 굳이 안 열어봐도 방문했음만 빠르게 표시할 수 있도록).
+  async function renderInspectionStatus() {
+    const list = $("#inspectionStatusList");
+    if (!list) return;
+    const today = todayISO();
+    const [sched, sites, inspections] = await Promise.all([
+      FireDB.getScheduleByDate(today), FireDB.getAllSites(), FireDB.getAllInspections()
+    ]);
+    const siteIds = sched ? sched.siteIds : [];
+    if (siteIds.length === 0) {
+      list.innerHTML = `<div class="empty-state">오늘 스케줄에 등록된 업체가 없습니다.</div>`;
+      return;
+    }
+    const siteMap = new Map(sites.map((s) => [s.id, s]));
+    list.innerHTML = siteIds.map((id, idx) => {
+      const site = siteMap.get(id);
+      const todayInsp = inspections.find((i) => i.siteId === id && i.scheduledDate === today);
+      const done = !!(todayInsp && todayInsp.status === "completed");
+      return `
+        <div class="list-card">
+          <div class="list-card-title">
+            <span>${idx + 1}. ${escapeHtml(site ? site.name : "삭제된 업체")}</span>
+            <span class="badge badge-${done ? "completed" : "scheduled"}">${done ? "완료" : "예정"}</span>
+          </div>
+          ${done ? "" : `<button type="button" class="btn btn-secondary" data-complete-site="${id}">✅ 점검완료</button>`}
+        </div>
+      `;
+    }).join("");
+    $$("#inspectionStatusList [data-complete-site]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = btn.dataset.completeSite;
+        const site = siteMap.get(id);
+        const insp = await getOrCreateInspectionForDate(id, today, site);
+        await FireDB.updateInspection(insp.id, { status: "completed", completedDate: today });
+        await ensureDeficiencyRoundForDate(id, today);
+        toast(`${site ? site.name : "업체"} 점검완료 처리되었습니다.`, "success");
+        await renderInspectionStatus();
+        await renderNearbyRestaurants();
+      });
+    });
+  }
+
+  // 근처 맛집 추천 - "가장 최근에 점검완료한 업체"를 기준으로 카카오 로컬 API에서 근처 음식점
+  // 3곳을 거리순으로 가져온다(사용자 요청 - 방문을 마친 근처에서 식사할 곳을 바로 찾기 위함).
+  async function findMostRecentlyCompletedSite() {
+    const [inspections, sites] = await Promise.all([FireDB.getAllInspections(), FireDB.getAllSites()]);
+    const lastBySite = computeLastInspectionBySite(inspections);
+    let best = null, bestDate = "";
+    for (const insp of lastBySite.values()) {
+      const d = insp.completedDate || insp.scheduledDate || "";
+      if (d > bestDate) { bestDate = d; best = insp; }
+    }
+    if (!best) return null;
+    const siteMap = new Map(sites.map((s) => [s.id, s]));
+    return siteMap.get(best.siteId) || null;
+  }
+
+  async function renderNearbyRestaurants() {
+    const card = $("#nearbyRestaurants");
+    if (!card) return;
+    const site = await findMostRecentlyCompletedSite();
+    if (!site) {
+      card.innerHTML = `<div class="empty-state">완료된 점검이 아직 없습니다.</div>`;
+      return;
+    }
+    if (!site.address) {
+      card.innerHTML = `<div class="empty-state">${escapeHtml(site.name)}의 주소가 등록되어 있지 않습니다.</div>`;
+      return;
+    }
+    if (!KakaoLocal.getKey()) {
+      card.innerHTML = `<div class="empty-state">설정 탭에서 맛집 추천 API 키를 입력하면 이용할 수 있습니다.</div>`;
+      return;
+    }
+    card.innerHTML = `<div class="empty-state">불러오는 중...</div>`;
+    try {
+      const restaurants = await KakaoLocal.recommendNearAddress(site.address, 1500, 3);
+      const header = `<div class="hint-text">"${escapeHtml(site.name)}" 근처 (가장 최근 점검완료)</div>`;
+      if (restaurants.length === 0) {
+        card.innerHTML = header + `<div class="empty-state">근처에 음식점 정보가 없습니다.</div>`;
+        return;
+      }
+      card.innerHTML = header + restaurants.map((r) => `
+        <a class="list-card" href="${r.url}" target="_blank" rel="noopener">
+          <div class="list-card-title">
+            <span>${escapeHtml(r.name)}</span>
+            <span class="badge badge-scheduled">${r.distance}m</span>
+          </div>
+          <div class="list-card-sub">${escapeHtml(r.category)}${r.phone ? " · " + escapeHtml(r.phone) : ""}</div>
+          <div class="list-card-sub">${escapeHtml(r.address)}</div>
+        </a>
+      `).join("");
+    } catch (e) {
+      card.innerHTML = `<div class="empty-state">맛집 정보를 불러오지 못했습니다 (${escapeHtml((e && e.message) || "")})</div>`;
+    }
   }
 
   async function renderScheduleAgenda() {
@@ -3073,6 +3175,7 @@
     const apiKeys = BldReg.getKeys();
     $("#jusoApiKey").value = apiKeys.jusoKey || "";
     $("#dataGoKrApiKey").value = apiKeys.dataGoKrKey || "";
+    $("#kakaoApiKey").value = KakaoLocal.getKey();
     $("#aiEnabledToggle").checked = AiFill.isEnabled();
     $("#changeHistoryEnabledToggle").checked = isChangeHistoryVisible();
     renderDriveStatus();
@@ -3123,8 +3226,8 @@
   // 확인 필요), 새 버전이 있으면 외부 브라우저로 APK 다운로드 URL을 열어 다운로드->설치를 대신 시작해준다.
   // version.js의 APP_VERSION은 마지막으로 웹 파일이 바뀐 실제 날짜/시간(한국시간)이고,
   // APP_VERSION_CODE/NAME은 APK를 새로 빌드해서 배포할 때만 올리는 별개의 버전 번호다.
-  const APP_VERSION_CODE = 37;
-  const APP_VERSION_NAME = "1.36";
+  const APP_VERSION_CODE = 38;
+  const APP_VERSION_NAME = "1.37";
   const UPDATE_MANIFEST_URL = "https://green3077.github.io/sobang1004/version.json";
   const IS_NATIVE_UPDATE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
   // 이 프로젝트는 번들러(webpack/vite 등)를 쓰지 않는 순수 스크립트 앱이라 @capacitor/core 전체가
@@ -3188,6 +3291,12 @@
       dataGoKrKey: $("#dataGoKrApiKey").value.trim()
     });
     toast("API 키가 저장되었습니다.");
+  });
+
+  $("#btnSaveKakaoKey").addEventListener("click", () => {
+    KakaoLocal.saveKey($("#kakaoApiKey").value.trim());
+    toast("맛집 추천 API 키가 저장되었습니다.");
+    renderNearbyRestaurants().catch(() => {});
   });
 
   $("#aiEnabledToggle").addEventListener("change", (e) => {

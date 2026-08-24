@@ -438,6 +438,8 @@ input[readonly] { background: var(--neutral-bg); color: var(--text-dim); }
   cursor: pointer;
   box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
+/* 근처 맛집 카드처럼 <a>로 쓸 때(카카오맵 링크로 바로 연결)도 div일 때와 똑같이 보이도록. */
+a.list-card { display: block; text-decoration: none; color: inherit; }
 .list-card-title { font-weight: 800; font-size: 17.5px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .list-card-title-main { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
 /* 배지(검토중/미해결/해결/지적사항 없음)를 점3개 메뉴 버튼 바로 왼쪽에 붙여서 상태와 메뉴가
