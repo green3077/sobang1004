@@ -426,18 +426,26 @@
     const now = new Date();
     $("#homeTodoDate").textContent = `${now.getFullYear()}년 ${now.getMonth() + 1}월 ${now.getDate()}일 (${WEEKDAY_LABEL[now.getDay()]})`;
 
-    const [inspections, sites] = await Promise.all([FireDB.getAllInspections(), FireDB.getAllSites()]);
+    const [inspections, sites, todaySchedule] = await Promise.all([
+      FireDB.getAllInspections(), FireDB.getAllSites(), FireDB.getScheduleByDate(today)
+    ]);
     const siteMap = new Map(sites.map((s) => [s.id, s]));
     const lastBySite = computeLastInspectionBySite(inspections);
     const pending = inspections.filter((i) => i.status !== "completed" && i.scheduledDate && i.scheduledDate <= today);
     pending.sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate));
+    const pendingSiteIds = new Set(pending.map((i) => i.siteId));
+
+    // 스케줄 관리에서 오늘 날짜로 "일정 확정"한 방문도 오늘의 할일에 포함한다(사용자 요청) - 이미
+    // 점검 기록(inspections)으로 오늘 할일에 뜬 거래처는 중복 표시하지 않는다.
+    const confirmedSiteIds = (todaySchedule && todaySchedule.confirmed ? todaySchedule.siteIds : [])
+      .filter((id) => siteMap.has(id) && !pendingSiteIds.has(id));
 
     const list = $("#homeTodoList");
-    if (pending.length === 0) {
+    if (pending.length === 0 && confirmedSiteIds.length === 0) {
       list.innerHTML = `<div class="home-todo-empty">오늘 예정된 할일이 없습니다.</div>`;
       return;
     }
-    list.innerHTML = pending.map((insp) => {
+    const inspectionCardsHtml = pending.map((insp) => {
       const site = siteMap.get(insp.siteId);
       const isOverdue = insp.scheduledDate < today;
       const last = site ? lastBySite.get(site.id) : null;
@@ -454,6 +462,23 @@
         </div>
       `;
     }).join("");
+    const scheduleCardsHtml = confirmedSiteIds.map((id) => {
+      const site = siteMap.get(id);
+      const last = lastBySite.get(id);
+      const lastDate = last ? (last.completedDate || last.scheduledDate) : "";
+      return `
+        <div class="home-todo-item" data-site-id="${id}">
+          <span class="home-todo-item-icon">📅</span>
+          <div class="home-todo-item-body">
+            <div class="home-todo-item-title">${escapeHtml(site.name)}</div>
+            <div class="home-todo-item-sub">${escapeHtml(inspectionTypeForMonth(site, today))} · 오늘 방문 확정</div>
+            <div class="home-todo-item-sub">마지막 점검일: ${lastDate ? escapeHtml(lastDate) : "이력 없음"}</div>
+            ${site.equipmentMemo ? `<div class="home-todo-item-memo">📝 ${escapeHtml(site.equipmentMemo)}</div>` : ""}
+          </div>
+        </div>
+      `;
+    }).join("");
+    list.innerHTML = inspectionCardsHtml + scheduleCardsHtml;
     $$("#homeTodoList .home-todo-item").forEach((el) => {
       el.addEventListener("click", () => openSiteDetail(el.dataset.siteId));
     });
