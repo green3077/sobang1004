@@ -1,5 +1,5 @@
 // 거래처(현장) 등록 정보 자동 인식 - 엑셀 / 워드 / PDF / 한글(HWP) / 사진(OCR)에서
-// 거래처명, 주소, 담당자, 소방안전관리자, 담당기사 정보를 추출 시도.
+// 거래처명, 주소, 담당자, 소방안전관리자 정보를 추출 시도(담당기사는 자동 인식하지 않음 - 사용자 요청).
 // 표/문서 형식이 제각각이라 100% 정확하지 않을 수 있음 - 항상 사용자가 확인/수정하는 것을 전제로 함(직접입력 폼에 채워서 보여줌).
 const ClientImport = (() => {
 
@@ -9,8 +9,6 @@ const ClientImport = (() => {
     { field: "fireManagerEduDate", labels: ["소방안전관리자 실무교육일자", "실무교육일자", "교육일자", "이수일자", "교육일"] },
     { field: "fireManagerPhone", labels: ["소방안전관리자 연락처", "소방안전관리자 전화번호", "소방안전관리자 휴대폰", "안전관리자 연락처"] },
     { field: "fireManagerName", labels: ["소방안전관리자 성명", "소방안전관리자명", "소방안전관리자", "안전관리자 성명", "안전관리자명", "안전관리자"] },
-    { field: "engineerPhone", labels: ["담당기사 연락처", "관리기사 연락처", "담당기사 전화번호"] },
-    { field: "engineerName", labels: ["담당기사 성명", "담당기사명", "담당기사", "관리기사 성명", "관리기사"] },
     { field: "contactPhone", labels: ["담당자 연락처", "담당자 전화번호", "담당자 휴대폰", "관계인 연락처", "연락처", "휴대전화", "휴대폰", "전화번호", "전화"] },
     { field: "contactName", labels: ["담당자 성명", "담당자명", "담당자", "관계인 성명", "관계인"] },
     { field: "address", labels: ["도로명주소", "소재지 주소", "소재지", "주소"] },
@@ -31,9 +29,9 @@ const ClientImport = (() => {
   const BUILDING_TYPE_CATEGORIES = ["근린생활시설", "공동주택", "단독주택", "업무시설", "숙박시설", "판매시설", "의료시설", "교육연구시설", "노유자시설", "수련시설", "운동시설", "위락시설", "창고시설", "위험물저장", "자동차관련시설", "동식물관련시설", "자원순환", "교정및군사시설", "방송통신시설", "발전시설", "묘지관련시설", "관광휴게시설", "장례시설", "야영장시설", "문화및집회시설", "종교시설", "공장", "지하가"];
   // 한 칸/줄에 역할명이 2개 이상 섞여있는 경우(예: "소방시설관리업자ㆍ소방안전관리자ㆍ관계인 : 도득현" 서명란) -
   // 실제로는 한 사람이 여러 역할을 겸하는 경우가 많으므로, 이름을 찾으면 해당되는 모든 역할 필드에 채운다.
-  const ROLE_TO_FIELD = { "소방안전관리자": "fireManagerName", "관계인": "contactName", "담당기사": "engineerName" };
+  const ROLE_TO_FIELD = { "소방안전관리자": "fireManagerName", "관계인": "contactName" };
   const ROLE_MARKERS = Object.keys(ROLE_TO_FIELD).concat(["소방시설관리업자"]);
-  const NAME_FIELDS = ["fireManagerName", "engineerName", "contactName"];
+  const NAME_FIELDS = ["fireManagerName", "contactName"];
 
   const PHONE_RE = /01[016789]-?\d{3,4}-?\d{4}|0\d{1,2}-?\d{3,4}-?\d{4}/;
 
@@ -443,7 +441,7 @@ const ClientImport = (() => {
       text.split(/\r?\n/).forEach((l) => { if (l.trim()) extractFieldsFromLine(l.trim(), result); });
     }
 
-    ["contactPhone", "fireManagerPhone", "engineerPhone"].forEach((f) => {
+    ["contactPhone", "fireManagerPhone"].forEach((f) => {
       if (result[f]) {
         const m = result[f].match(PHONE_RE);
         if (m) result[f] = m[0];

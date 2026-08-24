@@ -144,6 +144,28 @@
     }));
   }
 
+  // 현장점검 사진 버전의 fillMissingPhotosFromDrive - 지적사항과 달리 현장점검 사진은 원래
+  // 어떤 id들이 있어야 하는지 알 방법이 없었다(사진이 기기별 로컬에만 있고, 점검 회차 자체에는
+  // "이 회차엔 사진이 몇 장 있다"는 목록이 없었음) - 그래서 업로드/삭제 시 점검 회차(inspections,
+  // 공유 데이터)에 photoIds 목록을 같이 남겨두게 했다(이 파일의 업로드/삭제 핸들러 참고). 그
+  // 목록을 기준으로 이 기기 로컬에 없는 사진만 구글 드라이브에서 찾아 채운다.
+  // 주의: 이 기능을 추가하기 전에 이미 올라간 사진은 photoIds 목록이 없어 이 방식으로는 못 찾는다.
+  async function fillMissingInspectionPhotosFromDrive(inspectionId, photoMap) {
+    const insp = await FireDB.getInspection(inspectionId);
+    if (!insp || !insp.photoIds || !insp.photoIds.length) return;
+    const site = await FireDB.getSite(insp.siteId);
+    if (!site || !site.name) return;
+    const missing = insp.photoIds.filter((id) => !photoMap.has(id));
+    if (missing.length === 0) return;
+    await Promise.all(missing.map(async (id) => {
+      const blob = await DriveBackup.fetchFile(site.name, "현장점검_사진", `${id}.jpg`);
+      if (!blob) return;
+      const photo = { id, siteId: insp.siteId, inspectionId, blob, createdAt: new Date().toISOString() };
+      photoMap.set(id, photo);
+      FireDB.addPhoto(photo).catch(() => {});
+    }));
+  }
+
   // 지적사항 이행전/이행후 사진을 모바일에서 올릴 때 너무 오래 걸린다는 사용자 리포트(2026-08-22) -
   // 원인은 압축 없이 폰 카메라 원본(보통 3000~4000px, 수 MB)을 그대로 IndexedDB에 저장하고 그대로
   // 구글 드라이브까지 업로드하고 있었기 때문(느린 건 로컬 저장이 아니라 모바일 회선으로 원본 전체를
@@ -1600,7 +1622,9 @@
 
   async function loadGalleryPhotos() {
     const all = await FireDB.getPhotosByInspection(galleryActiveInspectionId);
-    galleryPhotos = all.slice().sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
+    const photoMap = new Map(all.map((p) => [p.id, p]));
+    await fillMissingInspectionPhotosFromDrive(galleryActiveInspectionId, photoMap);
+    galleryPhotos = Array.from(photoMap.values()).sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
     gallerySelected = new Set(Array.from(gallerySelected).filter((id) => galleryPhotos.some((p) => p.id === id)));
     renderGalleryGrid();
   }
@@ -1659,6 +1683,7 @@
     ImportLoading.show("사진을 저장하고 있습니다.");
     try {
       let idx = 0;
+      const newIds = [];
       for (const file of files) {
         idx++;
         ImportLoading.setProgress((idx / files.length) * 100, files.length > 1 ? `사진을 저장하고 있습니다. (${idx}/${files.length})` : "사진을 저장하고 있습니다.");
@@ -1670,6 +1695,17 @@
           createdAt: new Date().toISOString()
         });
         await backupToDrive(currentSiteId, "현장점검_사진", `${photo.id}.jpg`, uploadFile);
+        newIds.push(photo.id);
+      }
+      // 다른 사람/기기에서도 이 사진들이 보이도록, 점검 회차(공유 데이터)에 사진 id 목록을 남긴다 -
+      // 사진 원본은 기기별 로컬 저장이라 이 목록이 없으면 다른 기기는 구글 드라이브에서 무엇을
+      // 찾아와야 할지 알 방법이 없다(사용자가 겪은 문제: "다른 사람이 올린 사진이 안 보임").
+      if (newIds.length) {
+        const insp = await FireDB.getInspection(galleryActiveInspectionId);
+        if (insp) {
+          const photoIds = Array.from(new Set([...(insp.photoIds || []), ...newIds]));
+          await FireDB.updateInspection(galleryActiveInspectionId, { photoIds });
+        }
       }
     } finally {
       ImportLoading.hide();
@@ -1763,6 +1799,10 @@
     await FireDB.deletePhoto(p.id);
     gallerySelected.delete(p.id);
     closePhotoViewer();
+    const insp = await FireDB.getInspection(galleryActiveInspectionId);
+    if (insp && insp.photoIds && insp.photoIds.includes(p.id)) {
+      await FireDB.updateInspection(galleryActiveInspectionId, { photoIds: insp.photoIds.filter((id) => id !== p.id) });
+    }
     await loadGalleryPhotos();
   });
 

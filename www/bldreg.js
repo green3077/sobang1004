@@ -121,6 +121,33 @@ const BldReg = (() => {
     return { grndMin, grndMax, ugrndMin, ugrndMax, structures };
   }
 
+  // 거래처명이 "OO상가1"처럼 "상가" 뒤에 번호가 붙는 경우 - 표제부(대지 내 모든 동)에서 동명칭에
+  // "상가"와 그 번호가 함께 들어간 동을 찾아, 그 동 하나의 주용도/연면적/층수를 그대로 가져온다
+  // (여러 동을 합산하지 않음 - 사용자 요청). 번호가 포함된 동을 못 찾으면(동명칭에 번호 표기가
+  // 없는 경우 등) "상가"만 포함된 동으로 넉넉하게 다시 찾는다.
+  // 반환: item이 null이면 "상가"가 들어간 동 자체를 못 찾은 것 - 호출부가 처리.
+  async function lookupShoppingDong(address, number) {
+    const keys = getKeys();
+    if (!keys.jusoKey || !keys.dataGoKrKey) {
+      const err = new Error("missing_keys");
+      err.code = "missing_keys";
+      throw err;
+    }
+    const juso = await lookupAddress(address, keys.jusoKey);
+    const titleList = await getBuildingRegisterList(juso, keys.dataGoKrKey);
+    const shoppingDongs = titleList.filter((it) => (it.dongNm || "").includes("상가"));
+    let matched = shoppingDongs;
+    if (number) {
+      const numMatched = shoppingDongs.filter((it) => (it.dongNm || "").includes(number));
+      if (numMatched.length) matched = numMatched;
+    }
+    return {
+      juso,
+      item: matched[0] || null,
+      dongCandidates: shoppingDongs.map((it) => it.dongNm).filter(Boolean)
+    };
+  }
+
   // 반환: { juso, item, source, floorSummary } / item이 null이면 대장을 찾지 못함. source: "recap"(총괄표제부) | "title"(표제부/일반건축물)
   // floorSummary: item 자체에 층수/구조 정보가 없을 때(주로 총괄표제부인 경우)만 대지 내 모든 동의 표제부를 조회해 채운 값. 없으면 null.
   async function lookup(address) {
@@ -155,5 +182,5 @@ const BldReg = (() => {
     return { juso, item, source, floorSummary };
   }
 
-  return { getKeys, saveKeys, lookup };
+  return { getKeys, saveKeys, lookup, lookupShoppingDong };
 })();

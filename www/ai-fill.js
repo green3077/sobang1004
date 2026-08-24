@@ -217,8 +217,6 @@ const AiFill = (() => {
     fireManagerPhone: "소방안전관리자 전화번호, 000-0000-0000 형식",
     fireManagerAppointDate: "소방안전관리자 선임일자, YYYY-MM-DD 형식",
     fireManagerEduDate: "소방안전관리자 실무교육(최근 교육이수)일자, YYYY-MM-DD 형식",
-    engineerName: "담당기사 성명",
-    engineerPhone: "담당기사 전화번호, 000-0000-0000 형식",
     receiverLocation: "수신기(자동화재탐지설비) 설치 위치",
     pumpRoomLocation: "펌프실(주된 수원) 설치 위치",
     area: "연면적 (숫자만, 단위 ㎡ 제외)",

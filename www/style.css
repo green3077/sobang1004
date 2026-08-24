@@ -19,6 +19,13 @@
   --warn-bg: #fbf0d9;
   --neutral-bg: #eceef0;
   --border: #e1dccf;
+  /* 스케줄 달력 전용 - 확정(밝은 노랑) / 예정(노랑의 보색인 파랑) / 일정없음(회색) */
+  --sched-none-bg: #dfe2e6;
+  --sched-pending-bg: #dde5ff;
+  --sched-pending: #33459e;
+  --sched-confirmed-bg: #ffe14d;
+  --sched-confirmed: #7a5c00;
+  --sched-sat: #2f6fed;
 }
 body {
   margin: 0;
@@ -548,27 +555,39 @@ input[readonly] { background: var(--neutral-bg); color: var(--text-dim); }
   aspect-ratio: 1;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   border-radius: 10px; cursor: pointer; font-size: 14px; font-weight: 700; color: var(--text);
-  background: var(--neutral-bg); border: 2px solid transparent;
+  background: var(--sched-none-bg); border: 2px solid transparent;
 }
 .schedule-day-cell.is-empty { visibility: hidden; cursor: default; }
-.schedule-day-cell.has-schedule { background: #dce9f6; }
-.schedule-day-cell.is-confirmed { background: var(--warn-bg); color: var(--warn); }
+.schedule-day-cell.has-schedule { background: var(--sched-pending-bg); color: var(--sched-pending); }
+.schedule-day-cell.is-confirmed { background: var(--sched-confirmed-bg); color: var(--sched-confirmed); }
 .schedule-day-cell.is-today { border-color: var(--gold); }
 .schedule-day-cell.is-selected { border-color: var(--accent); }
 .schedule-day-count { font-size: 10.5px; font-weight: 700; margin-top: 1px; }
-.schedule-legend { display: flex; gap: 16px; margin-top: 10px; font-size: 13px; color: var(--text-dim); }
+/* 날짜 숫자 색은 셀 배경(방문 일정 상태)과 별개로 요일/공휴일을 나타낸다 - 자식 요소에
+   직접 색을 지정해서 위 .schedule-day-cell 계열 배경색 규칙에 덮이지 않게 한다. */
+.schedule-day-num.is-sat { color: var(--sched-sat); }
+.schedule-day-num.is-sun { color: var(--danger); }
+.schedule-legend { display: flex; gap: 16px; margin-top: 10px; font-size: 13px; color: var(--text-dim); flex-wrap: wrap; }
 .schedule-legend-item { display: flex; align-items: center; gap: 6px; }
-.schedule-legend-dot { width: 12px; height: 12px; border-radius: 50%; background: #dce9f6; display: inline-block; }
-.schedule-legend-dot-confirmed { background: var(--warn-bg); border: 2px solid var(--warn); }
+.schedule-legend-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--sched-pending-bg); border: 2px solid var(--sched-pending); display: inline-block; }
+.schedule-legend-dot-confirmed { background: var(--sched-confirmed-bg); border: 2px solid var(--sched-confirmed); }
+.schedule-legend-dot-none { background: var(--sched-none-bg); border: 2px solid var(--text-dim); }
 
 .schedule-selected-date { font-size: 17px; font-weight: 800; color: var(--accent-dark); margin-bottom: 10px; }
 .schedule-day-company-list { margin-bottom: 12px; }
 .schedule-day-company-chip {
-  display: flex; align-items: center; justify-content: space-between;
-  background: var(--gold-bg); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px;
+  display: flex; align-items: center; gap: 8px;
+  background: var(--gold-bg); border-radius: 10px; padding: 8px 12px; margin-bottom: 8px;
   font-size: 15px; font-weight: 700; color: var(--accent-dark);
 }
-.schedule-day-company-chip button {
+.schedule-day-company-reorder { display: flex; flex-direction: column; gap: 1px; }
+.schedule-reorder-btn {
+  border: none; background: none; color: var(--accent-dark); font-size: 12px; line-height: 1;
+  cursor: pointer; padding: 3px 5px; font-family: inherit;
+}
+.schedule-reorder-btn:disabled { color: var(--border); cursor: default; }
+.schedule-day-company-name { flex: 1; min-width: 0; }
+.schedule-day-company-remove {
   border: none; background: none; color: var(--danger); font-size: 18px; font-weight: 800;
   cursor: pointer; padding: 0 4px; font-family: inherit;
 }
@@ -617,9 +636,13 @@ input[readonly] { background: var(--neutral-bg); color: var(--text-dim); }
 .report-meta-row > span:last-child { flex: 1; min-width: 0; text-align: right; word-break: keep-all; overflow-wrap: break-word; }
 .report-item-note { color: var(--text-dim); margin-top: 5px; }
 
-/* 사진 갤러리 (현장점검 사진 / 지적사항 사진 공용) */
-.site-gallery-actions { display: flex; gap: 10px; }
-.site-gallery-actions .btn { margin-top: 0; }
+/* 거래처 상세: 거래처 정보 카드 바로 아래 "점검 날짜(수정 가능) + 점검하기" 줄 -
+   둘 다 크게 눌러야 하는 버튼이라 btn-large를 쓰고, 좁은 화면에서는 두 줄로 줄바꿈되게 한다. */
+.site-start-inspection-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.site-start-inspection-row .btn { margin-top: 0; flex: 1 1 150px; }
+.site-inspection-date-btn { text-align: center; }
+
+/* 사진 갤러리 (점검 회차별 현장점검 사진) */
 .gallery-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
 .gallery-toolbar .btn { margin-top: 0; flex: 1 1 auto; min-width: 120px; }
 .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; margin-bottom: 18px; }

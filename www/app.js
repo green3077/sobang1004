@@ -2,11 +2,16 @@
 (() => {
   let editingSiteId = null;
   let currentSiteId = null;      // 현장 상세 화면에서 보고 있는 현장
+  let currentInspectionId = null; // 점검 상세/사진 갤러리 화면에서 보고 있는 점검 회차(날짜)
+  let selectedInspectionDate = null; // 거래처 상세의 "점검하기" 버튼이 사용할 날짜 - 기본 오늘, 사용자가 수정 가능
   let currentConstructionSiteId = null;  // 공사팀에서 보고 있는 업체(=현장)
   let activeObjectUrls = [];
   let pendingAttachments = [];   // 신규 현장 등록 시 아직 저장 전인 첨부파일 (저장 시점에 실제 siteId로 옮겨 담음)
   let sitesSortMode = "name";    // "name"(가나다순) | "region"(지역별) - 거래처 목록 정렬 방식
   let sitesSelectedRegion = null; // 지역별 모드에서 드릴다운한 지역 (구/도 이름), null이면 지역 버튼 목록 표시 중
+  // "이번달" 필터 - 정렬 방식과 별개로 켜고 끌 수 있는 토글. "거래처 관리"(등록 화면 아래 목록)와
+  // "점검팀"(거래처 목록) 두 화면이 이 상태를 공유한다 - 같은 거래처 목록을 보여주는 화면이라서.
+  let sitesMonthOnly = false;
   let defSortMode = "name";      // 지적사항 허브(업체별) 정렬 방식, 거래처 목록과 동일한 개념
   let defSelectedRegion = null;
   let defFilters = new Set();    // 지적사항 허브 상태 필터: "pending"|"none"|"open"|"resolved" 중 선택된 것들 (OR 조건)
@@ -19,6 +24,11 @@
   let scheduleSelectedDate = "";      // 스케줄 관리에서 선택된 날짜 (YYYY-MM-DD)
   let scheduleCompanySearchTerm = ""; // 스케줄 관리 업체 선택 목록 검색어
   let scheduleStagedIds = new Set();  // 업체 선택 화면에서 "확인"을 누르기 전까지 임시로 체크된 업체 (저장 전)
+  // 업체 선택 목록 전용 정렬/필터 상태 - "거래처 관리"/"점검팀" 화면의 sitesSortMode와는 별개로 둔다
+  // (날짜별로 업체를 고르는 일시적인 작업이라, 여기서 지역별을 골랐다고 다른 화면까지 바뀌면 오히려 헷갈림).
+  let schedulePickSortMode = "name";      // "name"(가나다순) | "region"(지역별)
+  let schedulePickSelectedRegion = null;
+  let schedulePickMonthOnly = false;      // "이번달" 필터
 
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -131,6 +141,28 @@
       if (!blob) return;
       photoMap.set(id, { id, blob });
       FireDB.addPhoto({ id, siteId, itemId: def.id, role, blob, createdAt: new Date().toISOString() }).catch(() => {});
+    }));
+  }
+
+  // 현장점검 사진 버전의 fillMissingPhotosFromDrive - 지적사항과 달리 현장점검 사진은 원래
+  // 어떤 id들이 있어야 하는지 알 방법이 없었다(사진이 기기별 로컬에만 있고, 점검 회차 자체에는
+  // "이 회차엔 사진이 몇 장 있다"는 목록이 없었음) - 그래서 업로드/삭제 시 점검 회차(inspections,
+  // 공유 데이터)에 photoIds 목록을 같이 남겨두게 했다(이 파일의 업로드/삭제 핸들러 참고). 그
+  // 목록을 기준으로 이 기기 로컬에 없는 사진만 구글 드라이브에서 찾아 채운다.
+  // 주의: 이 기능을 추가하기 전에 이미 올라간 사진은 photoIds 목록이 없어 이 방식으로는 못 찾는다.
+  async function fillMissingInspectionPhotosFromDrive(inspectionId, photoMap) {
+    const insp = await FireDB.getInspection(inspectionId);
+    if (!insp || !insp.photoIds || !insp.photoIds.length) return;
+    const site = await FireDB.getSite(insp.siteId);
+    if (!site || !site.name) return;
+    const missing = insp.photoIds.filter((id) => !photoMap.has(id));
+    if (missing.length === 0) return;
+    await Promise.all(missing.map(async (id) => {
+      const blob = await DriveBackup.fetchFile(site.name, "현장점검_사진", `${id}.jpg`);
+      if (!blob) return;
+      const photo = { id, siteId: insp.siteId, inspectionId, blob, createdAt: new Date().toISOString() };
+      photoMap.set(id, photo);
+      FireDB.addPhoto(photo).catch(() => {});
     }));
   }
 
@@ -364,6 +396,27 @@
     return `<span class="inspection-schedule-badge">${comp} · 작동 ${sched.operationalMonth}월</span>`;
   }
 
+  // 점검 회차(날짜)가 작동점검인지 종합점검인지 - computeInspectionMonths로 구한 현장별
+  // 종합/작동 대상월과 그 날짜의 월을 비교해서 판단한다. 대상월을 아직 모르면(사용승인일/종합점검대상
+  // 미입력) 기본값인 작동점검으로 표시.
+  function inspectionTypeForMonth(site, dateStr) {
+    const sched = computeInspectionMonths(site);
+    const month = parseInt((dateStr || todayISO()).slice(5, 7), 10);
+    if (sched) {
+      if (sched.comprehensiveMonth === month) return "종합점검";
+      if (sched.operationalMonth === month) return "작동점검";
+    }
+    return "작동점검";
+  }
+
+  // "이번달" 필터 - 이번 달이 그 현장의 종합점검월 또는 작동점검월과 같으면 true.
+  function isSiteInCurrentMonth(site) {
+    const sched = computeInspectionMonths(site);
+    if (!sched) return false;
+    const month = new Date().getMonth() + 1;
+    return sched.comprehensiveMonth === month || sched.operationalMonth === month;
+  }
+
   function showScreen(id) {
     $$(".screen").forEach((s) => s.classList.remove("active"));
     $("#" + id).classList.add("active");
@@ -378,11 +431,10 @@
     "screen-construction-company": "btnBackFromConstructionCompany",
     "screen-construction-estimates": "btnBackFromConstructionEstimates",
     "screen-construction-history": "btnBackFromConstructionHistory",
-    "screen-inspection-team": "btnBackFromInspectionTeam",
     "screen-site-entry-choice": "btnCancelEntryChoice",
     "screen-site-form": "btnCancelSiteForm",
     "screen-site-detail": "btnBackToSites",
-    "screen-photo-gallery": "btnBackFromGallery",
+    "screen-inspection-detail": "btnBackFromInspectionDetail",
     "screen-deficiency-rounds": "btnBackFromRounds",
     "screen-deficiencies": "btnBackFromDeficiencies",
     "screen-completion-report": "btnBackFromCompletionReport"
@@ -396,18 +448,26 @@
     const now = new Date();
     $("#homeTodoDate").textContent = `${now.getFullYear()}년 ${now.getMonth() + 1}월 ${now.getDate()}일 (${WEEKDAY_LABEL[now.getDay()]})`;
 
-    const [inspections, sites] = await Promise.all([FireDB.getAllInspections(), FireDB.getAllSites()]);
+    const [inspections, sites, todaySchedule] = await Promise.all([
+      FireDB.getAllInspections(), FireDB.getAllSites(), FireDB.getScheduleByDate(today)
+    ]);
     const siteMap = new Map(sites.map((s) => [s.id, s]));
     const lastBySite = computeLastInspectionBySite(inspections);
     const pending = inspections.filter((i) => i.status !== "completed" && i.scheduledDate && i.scheduledDate <= today);
     pending.sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate));
+    const pendingSiteIds = new Set(pending.map((i) => i.siteId));
+
+    // 스케줄 관리에서 오늘 날짜로 "일정 확정"한 방문도 오늘의 할일에 포함한다(사용자 요청) - 이미
+    // 점검 기록(inspections)으로 오늘 할일에 뜬 거래처는 중복 표시하지 않는다.
+    const confirmedSiteIds = (todaySchedule && todaySchedule.confirmed ? todaySchedule.siteIds : [])
+      .filter((id) => siteMap.has(id) && !pendingSiteIds.has(id));
 
     const list = $("#homeTodoList");
-    if (pending.length === 0) {
+    if (pending.length === 0 && confirmedSiteIds.length === 0) {
       list.innerHTML = `<div class="home-todo-empty">오늘 예정된 할일이 없습니다.</div>`;
       return;
     }
-    list.innerHTML = pending.map((insp) => {
+    const inspectionCardsHtml = pending.map((insp) => {
       const site = siteMap.get(insp.siteId);
       const isOverdue = insp.scheduledDate < today;
       const last = site ? lastBySite.get(site.id) : null;
@@ -424,6 +484,23 @@
         </div>
       `;
     }).join("");
+    const scheduleCardsHtml = confirmedSiteIds.map((id) => {
+      const site = siteMap.get(id);
+      const last = lastBySite.get(id);
+      const lastDate = last ? (last.completedDate || last.scheduledDate) : "";
+      return `
+        <div class="home-todo-item" data-site-id="${id}">
+          <span class="home-todo-item-icon">📅</span>
+          <div class="home-todo-item-body">
+            <div class="home-todo-item-title">${escapeHtml(site.name)}</div>
+            <div class="home-todo-item-sub">${escapeHtml(inspectionTypeForMonth(site, today))} · 오늘 방문 확정</div>
+            <div class="home-todo-item-sub">마지막 점검일: ${lastDate ? escapeHtml(lastDate) : "이력 없음"}</div>
+            ${site.equipmentMemo ? `<div class="home-todo-item-memo">📝 ${escapeHtml(site.equipmentMemo)}</div>` : ""}
+          </div>
+        </div>
+      `;
+    }).join("");
+    list.innerHTML = inspectionCardsHtml + scheduleCardsHtml;
     $$("#homeTodoList .home-todo-item").forEach((el) => {
       el.addEventListener("click", () => openSiteDetail(el.dataset.siteId));
     });
@@ -467,10 +544,18 @@
       $("#btnHeaderBack").click();
     });
   }
-  $("#btnHomeAddSite").addEventListener("click", () => $("#btnAddSite").click());
+  // "거래처 관리" 홈 타일 - 등록 방법 선택 화면을 열면서, 그 아래 기존 거래처 목록도 같이 보여준다.
+  $("#btnHomeAddSite").addEventListener("click", () => {
+    renderEntrySites().catch(reportLoadFailure);
+    showScreen("screen-site-entry-choice");
+  });
+  // "점검팀" 홈 타일 - 기존 "거래처 보기"와 같은 화면(거래처 목록)을 그대로 연다.
   $("#btnHomeViewSites").addEventListener("click", () => { renderSites(); showScreen("screen-sites"); });
-  $("#btnHomeConstructionTeam").addEventListener("click", () => { renderConstructionTeam(); showScreen("screen-construction-team"); });
-  $("#btnHomeInspectionTeam").addEventListener("click", () => showScreen("screen-inspection-team"));
+  // "공사팀" 홈 타일 - 더 이상 공사팀 화면으로 가지 않고, 지적사항 메뉴를 바로 연다(사용자 요청).
+  $("#btnHomeConstructionTeam").addEventListener("click", () => {
+    renderDeficiencyHub().catch(reportLoadFailure);
+    showScreen("screen-deficiency-hub");
+  });
   $("#btnHomeScheduleManage").addEventListener("click", async () => {
     scheduleCalDate = new Date();
     await selectScheduleDate(todayISO());
@@ -478,7 +563,6 @@
   });
   $("#btnBackFromScheduleManage").addEventListener("click", goHome);
   $("#btnBackFromConstructionTeam").addEventListener("click", goHome);
-  $("#btnBackFromInspectionTeam").addEventListener("click", goHome);
 
   // ---------- 공사팀 (업체 = 거래처 재사용, 견적서/공사내역은 업체별 하위 메뉴) ----------
   async function renderConstructionTeam() {
@@ -623,19 +707,19 @@
     bindSiteCardClicks(list);
   }
 
-  function renderSitesByRegion(sites, lastBySite) {
-    const list = $("#sitesList");
-
+  // list/rerender를 인자로 받아서 "거래처 관리"(entrySitesList)와 "점검팀"(sitesList) 두 화면이
+  // 정렬 상태(sitesSortMode/sitesSelectedRegion)를 공유하면서도 각자의 DOM에 그릴 수 있게 한다.
+  function renderSitesByRegion(sites, lastBySite, list, rerender) {
     if (sitesSelectedRegion) {
       const filtered = sites.filter((s) => classifyRegion(s.address) === sitesSelectedRegion);
-      const backBtnHtml = `<button class="btn btn-secondary region-back-row" id="btnBackToRegionList">← 지역 목록으로 (${escapeHtml(sitesSelectedRegion)})</button>`;
+      const backBtnHtml = `<button class="btn btn-secondary region-back-row" type="button">← 지역 목록으로 (${escapeHtml(sitesSelectedRegion)})</button>`;
       if (filtered.length === 0) {
         list.innerHTML = `${backBtnHtml}<div class="empty-state">이 지역에 등록된 현장이 없습니다.</div>`;
       } else {
         list.innerHTML = backBtnHtml + filtered.map((s) => siteCardHtml(s, lastBySite)).join("");
         bindSiteCardClicks(list);
       }
-      $("#btnBackToRegionList").addEventListener("click", () => { sitesSelectedRegion = null; renderSites(); });
+      list.querySelector(".region-back-row").addEventListener("click", () => { sitesSelectedRegion = null; rerender(); });
       return;
     }
 
@@ -658,7 +742,7 @@
       </button>
     `).join("")}</div>`;
     Array.from(list.querySelectorAll(".region-btn")).forEach((btn) => {
-      btn.addEventListener("click", () => { sitesSelectedRegion = btn.dataset.region; renderSites(); });
+      btn.addEventListener("click", () => { sitesSelectedRegion = btn.dataset.region; rerender(); });
     });
   }
 
@@ -675,17 +759,27 @@
     return lastBySite;
   }
 
-  async function renderSites() {
-    const [sites, inspections] = await Promise.all([FireDB.getAllSites(), FireDB.getAllInspections()]);
-    sites.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  // 거래처 목록 렌더링 본체 - listElId/summaryElId/toolbarIds만 다르면 "거래처 관리" 화면 아래 목록과
+  // "점검팀" 화면 둘 다 이 함수 하나로 그린다(정렬/지역/이번달 상태는 공유).
+  async function renderSiteListInto(listElId, summaryElId, toolbarIds) {
+    $("#" + toolbarIds.name).classList.toggle("active", sitesSortMode === "name");
+    $("#" + toolbarIds.region).classList.toggle("active", sitesSortMode === "region");
+    $("#" + toolbarIds.month).classList.toggle("active", sitesMonthOnly);
+
+    const [allSites, inspections] = await Promise.all([FireDB.getAllSites(), FireDB.getAllInspections()]);
+    allSites.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+    const sites = sitesMonthOnly ? allSites.filter(isSiteInCurrentMonth) : allSites;
 
     const lastBySite = computeLastInspectionBySite(inspections);
 
-    const list = $("#sitesList");
-    const summary = $("#sitesSummary");
+    const list = $("#" + listElId);
+    const summary = $("#" + summaryElId);
+    const rerender = () => renderSiteListInto(listElId, summaryElId, toolbarIds);
     if (sites.length === 0) {
       summary.textContent = "";
-      list.innerHTML = `<div class="empty-state">등록된 현장이 없습니다.<br>현장을 추가해 점검을 시작하세요.</div>`;
+      list.innerHTML = sitesMonthOnly
+        ? `<div class="empty-state">이번 달 종합점검/작동점검 대상 거래처가 없습니다.</div>`
+        : `<div class="empty-state">등록된 현장이 없습니다.<br>현장을 추가해 점검을 시작하세요.</div>`;
       return;
     }
 
@@ -697,38 +791,53 @@
         const regionCount = new Set(sites.map((s) => classifyBroadRegion(s.address))).size;
         summary.innerHTML = `전체 <strong>${sites.length}개</strong> 거래처 · ${regionCount}개 지역`;
       }
-      renderSitesByRegion(sites, lastBySite);
+      renderSitesByRegion(sites, lastBySite, list, rerender);
       return;
     }
     summary.innerHTML = `전체 <strong>${sites.length}개</strong> 거래처`;
     renderSiteCardsInto(list, sites, lastBySite, "등록된 현장이 없습니다.");
   }
 
-  $("#btnSortByName").addEventListener("click", () => {
-    sitesSortMode = "name";
-    sitesSelectedRegion = null;
-    $("#btnSortByName").classList.add("active");
-    $("#btnSortByRegion").classList.remove("active");
-    renderSites();
-  });
-  $("#btnSortByRegion").addEventListener("click", () => {
-    sitesSortMode = "region";
-    $("#btnSortByRegion").classList.add("active");
-    $("#btnSortByName").classList.remove("active");
-    renderSites();
-  });
+  const SITES_TOOLBAR_IDS = { name: "btnSortByName", region: "btnSortByRegion", month: "btnFilterThisMonth" };
+  const ENTRY_SITES_TOOLBAR_IDS = { name: "btnEntrySortByName", region: "btnEntrySortByRegion", month: "btnEntryFilterThisMonth" };
 
-  // 방문 예약/이력(일정관리, 오늘의 할일, 마지막 점검일) 트리거 - 예전엔 체크리스트를 여는 것 자체가 트리거였으나
-  // 체크리스트가 사진 갤러리로 대체되면서, 이제 "현장점검 사진" 갤러리를 여는 것이 같은 역할을 한다.
-  async function getOrCreateActiveInspection(siteId) {
+  function renderSites() {
+    return renderSiteListInto("sitesList", "sitesSummary", SITES_TOOLBAR_IDS);
+  }
+  function renderEntrySites() {
+    return renderSiteListInto("entrySitesList", "entrySitesSummary", ENTRY_SITES_TOOLBAR_IDS);
+  }
+
+  // 가나다순/지역별/이번달 툴바 버튼 3개를 한 화면분 통째로 연결한다 - "거래처 관리"/"점검팀" 두
+  // 화면이 각자의 버튼 id만 다르고 나머지 동작은 동일해서 이 함수 하나로 양쪽을 다 연결한다.
+  function wireSiteSortToolbar(toolbarIds, renderFn) {
+    $("#" + toolbarIds.name).addEventListener("click", () => {
+      sitesSortMode = "name";
+      sitesSelectedRegion = null;
+      renderFn();
+    });
+    $("#" + toolbarIds.region).addEventListener("click", () => {
+      sitesSortMode = "region";
+      renderFn();
+    });
+    $("#" + toolbarIds.month).addEventListener("click", () => {
+      sitesMonthOnly = !sitesMonthOnly;
+      renderFn();
+    });
+  }
+  wireSiteSortToolbar(SITES_TOOLBAR_IDS, renderSites);
+  wireSiteSortToolbar(ENTRY_SITES_TOOLBAR_IDS, renderEntrySites);
+
+  // 방문 예약/이력(일정관리, 오늘의 할일, 마지막 점검일) 트리거 - "점검하기" 버튼을 누르면 그 날짜로
+  // 점검 기록을 하나 만들고(같은 날짜가 이미 있으면 그걸 재사용), 점검 이력 목록에 날짜별 탭으로 쌓인다.
+  async function getOrCreateInspectionForDate(siteId, dateStr, site) {
     const inspections = await FireDB.getInspectionsBySite(siteId);
-    const inProgress = inspections.filter((i) => i.status !== "completed");
-    inProgress.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-    if (inProgress.length > 0) return inProgress[0];
+    const existing = inspections.find((i) => i.scheduledDate === dateStr);
+    if (existing) return existing;
     const insp = {
       siteId,
-      type: "작동점검",
-      scheduledDate: todayISO(),
+      type: inspectionTypeForMonth(site, dateStr),
+      scheduledDate: dateStr,
       inspector: "",
       status: "scheduled",
       completedDate: null,
@@ -916,8 +1025,9 @@
     toast(`${files.length}개 자료를 첨부했습니다.`);
   });
 
-  $("#btnAddSite").addEventListener("click", () => showScreen("screen-site-entry-choice"));
-  $("#btnCancelEntryChoice").addEventListener("click", () => { renderSites(); showScreen("screen-sites"); });
+  // "취소"/헤더 뒤로가기 - 예전엔 거래처 목록 화면(screen-sites)으로 건너뛰었는데, 이제 이 화면
+  // 자체에 거래처 목록이 있으니 그냥 원래 있던 화면(홈)으로 돌아간다(사용자 요청: 이전 페이지로만).
+  $("#btnCancelEntryChoice").addEventListener("click", goHome);
   $("#btnEntryManual").addEventListener("click", openBlankSiteForm);
   $("#btnEntryImport").addEventListener("click", () => $("#clientImportInput").click());
 
@@ -954,6 +1064,13 @@
           ImportLoading.setProgress(percent, "사진에서 글자를 인식하고 있습니다.")
         );
       }
+      // 담당기사(성명/연락처)는 자료에서 절대 자동으로 채우지 않는다(사용자 요청) - AI/정규식 추출
+      // 쪽에서 이미 이 두 필드를 요청/인식하지 않도록 해뒀지만, 혹시라도 값이 섞여 들어오는 경로가
+      // 생기더라도 폼에 닿기 전에 여기서 한 번 더 확실히 비운다.
+      if (result && result.fields) {
+        delete result.fields.engineerName;
+        delete result.fields.engineerPhone;
+      }
       {
         const guessName = (result.fields && result.fields.name) || file.name.replace(/\.[^.]+$/, "");
         driveBackupPromise = DriveBackup.uploadToSite(guessName, "거래처_등록자료", file.name, file).catch(() => null);
@@ -974,7 +1091,6 @@
         contactName: "siteContactName", contactPhone: "siteContactPhone",
         fireManagerName: "siteFireManagerName", fireManagerPhone: "siteFireManagerPhone",
         fireManagerAppointDate: "siteFireManagerAppointDate", fireManagerEduDate: "siteFireManagerEduDate",
-        engineerName: "siteEngineerName", engineerPhone: "siteEngineerPhone",
         receiverLocation: "siteReceiverLocation", pumpRoomLocation: "sitePumpRoomLocation",
         area: "siteArea", approvalDate: "siteApprovalDate", floorInfo: "siteFloorInfo",
         buildingType: "siteBuildingType"
@@ -1150,6 +1266,48 @@
 
   let lastAutoBldRegAddress = "";
 
+  // 지상/지하 최고 층수를 "지상 n층 / 지하 n층" 텍스트로 - 지하는 0층(=지하 없음)이면 "지하 0층"이
+  // 아니라 "지하 -"로 표시한다.
+  function floorRangeText(max, label) {
+    if (max == null) return "";
+    return label === "지하" && max === 0 ? "지하 -" : `${label} ${max}층`;
+  }
+  function formatApprovalDate(raw) {
+    return /^\d{8}$/.test(raw || "") ? `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}` : (raw || "");
+  }
+
+  // 거래처명이 "OO상가1"처럼 "상가" 뒤에 번호가 붙어 있으면, 표제부(대지 내 모든 동)에서 동명칭에
+  // "상가"와 그 번호가 함께 들어간 동 하나를 찾아 그 동의 주용도/연면적/층수를 그대로 가져온다
+  // (여러 동을 합치지 않음 - 사용자 요청). "상가" 뒤에 번호가 없으면 "상가"만 포함된 동으로 찾는다.
+  async function lookupShoppingCenterBldReg(siteName, address, resultBox) {
+    const numMatch = siteName.match(/상가\s*(\d+)/);
+    const number = numMatch ? numMatch[1] : null;
+    const result = await BldReg.lookupShoppingDong(address, number);
+    const item = result.item;
+    if (!item) {
+      resultBox.innerHTML = `<div class="bldreg-error">표제부에서 동명칭에 "상가"가 포함된 동을 찾지 못했습니다. 건물명·주소를 확인하거나 직접 입력해주세요.</div>`;
+      return;
+    }
+    const floorInfo = [floorRangeText(item.grndFlrCnt ? parseInt(item.grndFlrCnt, 10) : null, "지상"), floorRangeText(item.ugrndFlrCnt ? parseInt(item.ugrndFlrCnt, 10) : null, "지하")].filter(Boolean).join(" / ");
+    const fetched = {
+      buildingType: item.mainPurpsCdNm || "",
+      area: item.totArea || "",
+      floorInfo
+    };
+    if (fetched.buildingType) $("#siteBuildingType").value = fetched.buildingType;
+    if (fetched.area) $("#siteArea").value = fetched.area;
+    if (fetched.floorInfo) $("#siteFloorInfo").value = fetched.floorInfo;
+    resultBox.innerHTML = `
+      <div class="report-meta-row"><span class="label">대장구분</span><span>표제부 (상가${number ? " " + escapeHtml(number) : ""})</span></div>
+      <div class="report-meta-row"><span class="label">동명칭</span><span>${escapeHtml(item.dongNm || "-")}</span></div>
+      <div class="report-meta-row"><span class="label">주용도</span><span>${escapeHtml(fetched.buildingType || "-")}</span></div>
+      <div class="report-meta-row"><span class="label">연면적</span><span>${escapeHtml(fetched.area ? fetched.area + " ㎡" : "-")}</span></div>
+      <div class="report-meta-row"><span class="label">층수</span><span>${escapeHtml(fetched.floorInfo || "-")}</span></div>
+      <div class="hint-text">거래처명의 "상가${number ? number : ""}"와 동명칭이 일치하는 동의 정보를 불러왔습니다. 내용이 다르면 직접 수정해주세요.</div>
+    `;
+    toast("표제부에서 해당 상가 동 정보를 불러왔습니다.");
+  }
+
   async function lookupBldRegForCurrentAddress() {
     const address = $("#siteAddress").value.trim();
     const resultBox = $("#bldRegResult");
@@ -1163,6 +1321,11 @@
     resultBox.classList.remove("hidden");
     resultBox.innerHTML = `<div class="report-meta-row"><span class="label">상태</span><span>건축물대장 조회 중...</span></div>`;
     try {
+      const siteName = $("#siteName").value.trim();
+      if (siteName.includes("상가")) {
+        await lookupShoppingCenterBldReg(siteName, address, resultBox);
+        return;
+      }
       const { item, source, floorSummary } = await BldReg.lookup(address);
       if (!item) {
         resultBox.innerHTML = `<div class="bldreg-error">해당 주소의 건축물대장을 찾지 못했습니다. 주소를 정확히 입력했는지 확인하거나 직접 입력해주세요.</div>`;
@@ -1172,11 +1335,9 @@
       // 총괄표제부는 대지 전체 집계값(연면적 등)만 갖고 동별 층수/구조는 없다 - 이 경우
       // floorSummary(대지 내 모든 동의 표제부에서 집계)로 층수/구조를 채운다.
       // 동마다 층수가 달라도(floorSummary) 범위 대신 그중 가장 높은 층수만 표시.
-      // 지하는 0층(=지하 없음)이면 "지하 0층"이 아니라 "지하 -"로 표시.
-      const floorText = (max, label) => (max == null ? "" : label === "지하" && max === 0 ? "지하 -" : `${label} ${max}층`);
-      let floorInfo = [floorText(item.grndFlrCnt ? parseInt(item.grndFlrCnt, 10) : null, "지상"), floorText(item.ugrndFlrCnt ? parseInt(item.ugrndFlrCnt, 10) : null, "지하")].filter(Boolean).join(" / ");
+      let floorInfo = [floorRangeText(item.grndFlrCnt ? parseInt(item.grndFlrCnt, 10) : null, "지상"), floorRangeText(item.ugrndFlrCnt ? parseInt(item.ugrndFlrCnt, 10) : null, "지하")].filter(Boolean).join(" / ");
       if (!floorInfo && floorSummary) {
-        floorInfo = [floorText(floorSummary.grndMax, "지상"), floorText(floorSummary.ugrndMax, "지하")].filter(Boolean).join(" / ");
+        floorInfo = [floorRangeText(floorSummary.grndMax, "지상"), floorRangeText(floorSummary.ugrndMax, "지하")].filter(Boolean).join(" / ");
       }
       let structure = item.strctCdNm || "";
       if (!structure && floorSummary && floorSummary.structures.length) {
@@ -1186,7 +1347,7 @@
         buildingType: item.mainPurpsCdNm || "",
         area: item.totArea || "",
         floorInfo,
-        approvalDate: /^\d{8}$/.test(rawApprovalDate) ? `${rawApprovalDate.slice(0, 4)}-${rawApprovalDate.slice(4, 6)}-${rawApprovalDate.slice(6, 8)}` : rawApprovalDate,
+        approvalDate: formatApprovalDate(rawApprovalDate),
         structure
       };
       // 건축물대장이 실제로 값을 준 항목만 덮어쓴다 - 특정 항목을 비워서 응답하면(예: 연면적 "-")
@@ -1279,16 +1440,73 @@
       </div>
     `).join("");
 
+    selectedInspectionDate = todayISO();
+    renderInspectionDateButton();
+
     const inspections = await FireDB.getInspectionsBySite(id);
     inspections.sort((a, b) => (b.scheduledDate || "").localeCompare(a.scheduledDate || ""));
     const listEl = $("#siteInspectionsList");
     if (inspections.length === 0) {
-      listEl.innerHTML = `<div class="empty-state">점검 이력이 없습니다.</div>`;
+      listEl.innerHTML = `<div class="empty-state">점검 이력이 없습니다. "점검하기"를 눌러 오늘 방문을 시작하세요.</div>`;
     } else {
       listEl.innerHTML = inspections.map((i) => inspectionCardHtml(i, site)).join("");
+      Array.from(listEl.querySelectorAll(".list-card")).forEach((el) => {
+        const inspId = el.dataset.id;
+        el.addEventListener("click", () => openInspectionDetail(inspId));
+        const menuBtn = el.querySelector("[data-menu-btn]");
+        const menu = el.querySelector("[data-menu]");
+        menuBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const wasOpen = menu === openSiteCardMenu;
+          closeSiteCardMenu();
+          if (!wasOpen) { menu.classList.remove("hidden"); openSiteCardMenu = menu; }
+        });
+        menu.addEventListener("click", (e) => e.stopPropagation());
+        menu.querySelector("[data-menu-edit]").addEventListener("click", async () => {
+          closeSiteCardMenu();
+          const insp = inspections.find((i) => i.id === inspId);
+          const newDate = await promptDate("점검 날짜 수정", insp.scheduledDate);
+          if (!newDate) return;
+          await FireDB.updateInspection(inspId, { scheduledDate: newDate });
+          await openSiteDetail(id);
+        });
+        menu.querySelector("[data-menu-delete]").addEventListener("click", async () => {
+          closeSiteCardMenu();
+          const ok = await confirmDialog("이 점검 기록과 등록된 사진을 삭제할까요? 이 작업은 되돌릴 수 없습니다.");
+          if (!ok) return;
+          await FireDB.deleteInspection(inspId);
+          await openSiteDetail(id);
+        });
+      });
     }
     showScreen("screen-site-detail");
   }
+
+  function formatDateWithWeekday(dateStr) {
+    const d = new Date(dateStr + "T00:00:00");
+    if (isNaN(d.getTime())) return dateStr;
+    return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 (${WEEKDAY_LABEL[d.getDay()]})`;
+  }
+
+  function renderInspectionDateButton() {
+    $("#btnEditInspectionDate").textContent = `${formatDateWithWeekday(selectedInspectionDate)} ✎`;
+  }
+
+  // "점검하기" 버튼 위의 날짜 - 기본은 오늘 날짜지만, 다른 날짜로 점검을 시작/기록해야 할 때를
+  // 대비해 눌러서 바꿀 수 있게 한다(예: 어제 방문했는데 오늘 입력하는 경우).
+  $("#btnEditInspectionDate").addEventListener("click", async () => {
+    const newDate = await promptDate("점검 날짜 선택", selectedInspectionDate);
+    if (!newDate) return;
+    selectedInspectionDate = newDate;
+    renderInspectionDateButton();
+  });
+
+  $("#btnStartInspection").addEventListener("click", async () => {
+    if (!currentSiteId) return;
+    const site = await FireDB.getSite(currentSiteId);
+    const insp = await getOrCreateInspectionForDate(currentSiteId, selectedInspectionDate, site);
+    await openInspectionDetail(insp.id);
+  });
 
   $("#btnBackToSites").addEventListener("click", () => { renderSites(); showScreen("screen-sites"); });
 
@@ -1342,10 +1560,7 @@
     showScreen("screen-sites");
   });
 
-  $("#btnOpenSiteGallery").addEventListener("click", () => openPhotoGallery(currentSiteId, "site"));
-  $("#btnOpenDeficiencyGallery").addEventListener("click", () => openPhotoGallery(currentSiteId, "deficiency"));
-
-  // ================= 점검 목록 (일정관리 표시용 방문 이력 - 조회 전용) =================
+  // ================= 점검 목록 (거래처 상세의 날짜별 점검 탭) =================
   function computeStatus(insp) {
     if (insp.status === "completed") return "completed";
     if (insp.scheduledDate && insp.scheduledDate < todayISO()) return "overdue";
@@ -1356,53 +1571,60 @@
 
   function inspectionCardHtml(insp, site) {
     const st = computeStatus(insp);
+    const typeLabel = inspectionTypeForMonth(site, insp.scheduledDate);
     return `
-      <div class="list-card list-card-static">
+      <div class="list-card" data-id="${insp.id}">
         <div class="list-card-title">
-          <span>${escapeHtml(site ? site.name : "")}</span>
-          <span class="badge badge-${st}">${STATUS_LABEL[st]}</span>
+          <span class="list-card-title-main">${escapeHtml(insp.scheduledDate || "")}</span>
+          <span class="list-card-title-right">
+            <span class="badge badge-${st}">${STATUS_LABEL[st]}</span>
+            <button type="button" class="list-card-menu-btn" data-menu-btn>⋯</button>
+          </span>
         </div>
-        <div class="list-card-sub">${escapeHtml(insp.type)} · ${escapeHtml(insp.scheduledDate || "")}</div>
-        <div class="list-card-sub">${escapeHtml(insp.inspector ? "점검자: " + insp.inspector : "")}</div>
+        <div class="site-card-menu hidden" data-menu>
+          <button type="button" data-menu-edit>수정하기</button>
+          <button type="button" class="danger" data-menu-delete>삭제</button>
+        </div>
+        <div class="list-card-sub">${escapeHtml(typeLabel)}${insp.inspector ? " · 점검자: " + escapeHtml(insp.inspector) : ""}</div>
       </div>
     `;
   }
 
-  // ================= 사진 갤러리 (현장점검 사진 / 지적사항 사진 공용) =================
-  // 현장점검 사진: siteId로만 귀속되는 photos 레코드(itemId를 이 상수로 표시) - 지적사항과 마찬가지로 점검 기록과 무관.
-  // 지적사항 사진: 기존 지적사항 이행전/이행후 개별 업로드(itemId=지적사항 id)를 한곳에 모아 보여주기만 하는 조회 전용 화면.
-  const SITE_GALLERY_ITEM_ID = "site-gallery";
-  let galleryMode = null;              // "site" | "deficiency"
-  let galleryActiveInspectionId = null; // "site" 모드에서 방문 완료 처리 대상 점검 id
+  // 점검 이력 목록에서 날짜 하나를 눌렀을 때: 그 회차의 정보와 사진(업로드/열람)을 한 화면에서 보여준다 -
+  // 예전엔 "현장점검 사진" 버튼을 눌러야 별도 갤러리 화면으로 넘어갔는데, 그 한 단계를 없애고 이 화면
+  // 안에서 바로 사진을 올리고 볼 수 있게 합친 것(사용자 요청, 2026-08-24).
+  async function openInspectionDetail(inspId) {
+    const insp = await FireDB.getInspection(inspId);
+    if (!insp) { openSiteDetail(currentSiteId); return; }
+    currentInspectionId = inspId;
+    currentSiteId = insp.siteId;
+    galleryActiveInspectionId = inspId;
+    gallerySelected = new Set();
+    const site = await FireDB.getSite(insp.siteId);
+    const st = computeStatus(insp);
+    $("#inspectionDetailInfo").innerHTML = `
+      <h2>${escapeHtml(site ? site.name : "")}</h2>
+      <div class="report-meta-row"><span class="label">날짜</span><span>${escapeHtml(insp.scheduledDate || "")}</span></div>
+      <div class="report-meta-row"><span class="label">종류</span><span>${escapeHtml(inspectionTypeForMonth(site, insp.scheduledDate))}</span></div>
+      <div class="report-meta-row"><span class="label">상태</span><span class="badge badge-${st}">${STATUS_LABEL[st]}</span></div>
+    `;
+    await loadGalleryPhotos();
+    showScreen("screen-inspection-detail");
+  }
+
+  $("#btnBackFromInspectionDetail").addEventListener("click", () => openSiteDetail(currentSiteId));
+
+  // ================= 사진 갤러리 (점검 회차별 현장점검 사진 - 점검 상세 화면 안에 포함) =================
+  let galleryActiveInspectionId = null; // 현재 화면이 속한 점검 회차 id - 사진은 이 id로 귀속되고, "방문 완료 처리"도 이 회차를 대상으로 함
   let galleryPhotos = [];              // [{id, blob, createdAt, ...}]
   let gallerySelected = new Set();
   let galleryViewerIndex = -1;
 
-  async function openPhotoGallery(siteId, mode) {
-    currentSiteId = siteId;
-    galleryMode = mode;
-    galleryActiveInspectionId = null;
-    gallerySelected = new Set();
-    if (mode === "site") {
-      const insp = await getOrCreateActiveInspection(siteId);
-      galleryActiveInspectionId = insp.id;
-    }
-    const site = await FireDB.getSite(siteId);
-    $("#galleryTitle").textContent = `${site ? site.name : ""} · ${mode === "site" ? "현장점검 사진" : "지적사항 사진"}`;
-    $("#galleryHint").textContent = mode === "site"
-      ? "현장 사진을 여러 장 올릴 수 있습니다. 사진을 누르면 원본이 크게 보이고, 선택해서 외부로 공유할 수 있습니다."
-      : "지적사항에 등록된 이행전/이행후 사진을 한곳에 모아 봅니다. 선택해서 외부로 공유할 수 있습니다.";
-    $("#btnGalleryUpload").classList.toggle("hidden", mode !== "site");
-    $("#btnCompleteSiteVisit").classList.toggle("hidden", mode !== "site");
-    await loadGalleryPhotos();
-    showScreen("screen-photo-gallery");
-  }
-
   async function loadGalleryPhotos() {
-    const all = await FireDB.getPhotosBySite(currentSiteId);
-    galleryPhotos = all
-      .filter((p) => (galleryMode === "site") === (p.itemId === SITE_GALLERY_ITEM_ID))
-      .sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
+    const all = await FireDB.getPhotosByInspection(galleryActiveInspectionId);
+    const photoMap = new Map(all.map((p) => [p.id, p]));
+    await fillMissingInspectionPhotosFromDrive(galleryActiveInspectionId, photoMap);
+    galleryPhotos = Array.from(photoMap.values()).sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
     gallerySelected = new Set(Array.from(gallerySelected).filter((id) => galleryPhotos.some((p) => p.id === id)));
     renderGalleryGrid();
   }
@@ -1461,17 +1683,29 @@
     ImportLoading.show("사진을 저장하고 있습니다.");
     try {
       let idx = 0;
+      const newIds = [];
       for (const file of files) {
         idx++;
         ImportLoading.setProgress((idx / files.length) * 100, files.length > 1 ? `사진을 저장하고 있습니다. (${idx}/${files.length})` : "사진을 저장하고 있습니다.");
         const uploadFile = await compressPhotoForUpload(file);
         const photo = await FireDB.addPhoto({
           siteId: currentSiteId,
-          itemId: SITE_GALLERY_ITEM_ID,
+          inspectionId: galleryActiveInspectionId,
           blob: uploadFile,
           createdAt: new Date().toISOString()
         });
         await backupToDrive(currentSiteId, "현장점검_사진", `${photo.id}.jpg`, uploadFile);
+        newIds.push(photo.id);
+      }
+      // 다른 사람/기기에서도 이 사진들이 보이도록, 점검 회차(공유 데이터)에 사진 id 목록을 남긴다 -
+      // 사진 원본은 기기별 로컬 저장이라 이 목록이 없으면 다른 기기는 구글 드라이브에서 무엇을
+      // 찾아와야 할지 알 방법이 없다(사용자가 겪은 문제: "다른 사람이 올린 사진이 안 보임").
+      if (newIds.length) {
+        const insp = await FireDB.getInspection(galleryActiveInspectionId);
+        if (insp) {
+          const photoIds = Array.from(new Set([...(insp.photoIds || []), ...newIds]));
+          await FireDB.updateInspection(galleryActiveInspectionId, { photoIds });
+        }
       }
     } finally {
       ImportLoading.hide();
@@ -1521,7 +1755,7 @@
     const selectedPhotos = galleryPhotos.filter((p) => gallerySelected.has(p.id));
     if (selectedPhotos.length === 0) return;
     const files = selectedPhotos.map((p, i) => new File([p.blob], galleryPhotoFilename(p, i), { type: p.blob.type || "image/jpeg" }));
-    await shareOrDownloadFiles(files, galleryMode === "site" ? "현장점검 사진" : "지적사항 사진");
+    await shareOrDownloadFiles(files, "현장점검 사진");
   });
 
   function openPhotoViewer(photoId) {
@@ -1539,7 +1773,7 @@
     $("#photoViewerImg").src = url;
     $("#btnPhotoViewerPrev").disabled = galleryViewerIndex <= 0;
     $("#btnPhotoViewerNext").disabled = galleryViewerIndex >= galleryPhotos.length - 1;
-    $("#btnDeleteViewerPhoto").classList.toggle("hidden", galleryMode !== "site");
+    $("#btnDeleteViewerPhoto").classList.remove("hidden");
   }
 
   function closePhotoViewer() {
@@ -1565,20 +1799,21 @@
     await FireDB.deletePhoto(p.id);
     gallerySelected.delete(p.id);
     closePhotoViewer();
+    const insp = await FireDB.getInspection(galleryActiveInspectionId);
+    if (insp && insp.photoIds && insp.photoIds.includes(p.id)) {
+      await FireDB.updateInspection(galleryActiveInspectionId, { photoIds: insp.photoIds.filter((id) => id !== p.id) });
+    }
     await loadGalleryPhotos();
   });
 
   $("#btnCompleteSiteVisit").addEventListener("click", async () => {
     const ok = await confirmDialog("오늘 방문을 완료 처리할까요? (마지막 점검일이 갱신됩니다)");
     if (!ok || !galleryActiveInspectionId) return;
+    const insp = await FireDB.getInspection(galleryActiveInspectionId);
     await FireDB.updateInspection(galleryActiveInspectionId, { status: "completed", completedDate: todayISO() });
+    if (insp) await ensureDeficiencyRoundForDate(insp.siteId, insp.scheduledDate);
     toast("방문이 완료 처리되었습니다.", "success");
-  });
-
-  $("#btnBackFromGallery").addEventListener("click", () => {
-    closePhotoViewer();
-    if (currentSiteId) openSiteDetail(currentSiteId);
-    else { renderSites(); showScreen("screen-sites"); }
+    await openInspectionDetail(galleryActiveInspectionId);
   });
 
   // ================= 지적사항 / 이행완료 (점검 기록과 완전히 분리, 현장에만 귀속) =================
@@ -1846,8 +2081,8 @@
   });
 
   // 회차 도입 전(2026-08-22 이전)에 만들어진 지적사항은 roundId가 아예 없다 - 그런 현장을 처음
-  // 열 때 딱 한 번, 그 기존 지적사항 전체를 "기존 기록"이라는 회차 하나로 묶어준다(가장 이른
-  // 생성일을 회차 날짜로 사용). 이미 회차가 하나라도 있으면 마이그레이션할 게 없으므로 그냥 통과.
+  // 열 때 딱 한 번, 그 기존 지적사항 전체를 회차 하나로 묶어준다(가장 이른 생성일을 회차 날짜로
+  // 사용). 이미 회차가 하나라도 있으면 마이그레이션할 게 없으므로 그냥 통과.
   async function ensureRoundsForSite(siteId) {
     const rounds = await FireDB.getRoundsBySite(siteId);
     if (rounds.length > 0) return rounds;
@@ -1855,11 +2090,22 @@
     if (legacyDefs.length === 0) return rounds;
     legacyDefs.sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
     const date = (legacyDefs[0].createdAt || new Date().toISOString()).slice(0, 10);
-    const round = await FireDB.addRound({ siteId, date, label: "기존 기록", createdAt: new Date().toISOString() });
+    const round = await FireDB.addRound({ siteId, date, label: "", createdAt: new Date().toISOString() });
     for (const def of legacyDefs) {
       await FireDB.updateDeficiency(def.id, { roundId: round.id });
     }
     return [round];
+  }
+
+  // 거래처 상세에서 "방문 완료 처리"를 누른 날짜를, 지적사항 메뉴에도 같은 날짜의 회차로 자동
+  // 만들어준다(사용자 요청) - 방문을 마쳤으면 보통 그 자리에서 지적사항도 확인하므로, "+ 새 점검
+  // 회차 시작"으로 같은 날짜를 또 골라야 하는 수고를 없앤다. 그 날짜의 회차가 이미 있으면(예:
+  // 지적사항 메뉴에서 먼저 만들어둔 경우) 중복 생성하지 않고 그대로 둔다.
+  async function ensureDeficiencyRoundForDate(siteId, date) {
+    if (!date) return;
+    const rounds = await FireDB.getRoundsBySite(siteId);
+    if (rounds.some((r) => r.date === date)) return;
+    await FireDB.addRound({ siteId, date, label: "", createdAt: new Date().toISOString() });
   }
 
   async function openSiteRounds(siteId) {
@@ -1908,7 +2154,7 @@
       return `
         <div class="list-card" data-round="${r.id}">
           <div class="list-card-title">
-            <span class="list-card-title-main">${escapeHtml(r.date || "")}${r.label ? ` · ${escapeHtml(r.label)}` : ""}</span>
+            <span class="list-card-title-main">${escapeHtml(r.date || "")}</span>
             <span class="list-card-title-right">
               <span class="list-card-badges">${badges}</span>
               <button type="button" class="list-card-menu-btn" data-menu-btn>⋯</button>
@@ -3137,6 +3383,24 @@
     return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }
 
+  // 법정 공휴일(대체공휴일 포함) - 설날/추석/부처님오신날처럼 음력 기준이라 해마다 날짜가 달라지는
+  // 공휴일은 계산으로 구할 수 없어 연도별로 직접 채워둔다. 여기 없는 연도(2028년 이후 등)는
+  // 달력에 공휴일 빨간색 표시만 안 될 뿐 나머지 기능에는 영향이 없다 - 해가 바뀌면 이 목록을 갱신한다.
+  const KR_HOLIDAYS = new Set([
+    // 2025
+    "2025-01-01", "2025-01-28", "2025-01-29", "2025-01-30", "2025-03-03",
+    "2025-05-05", "2025-06-06", "2025-08-15", "2025-10-03", "2025-10-06",
+    "2025-10-07", "2025-10-08", "2025-10-09", "2025-12-25",
+    // 2026
+    "2026-01-01", "2026-02-16", "2026-02-17", "2026-02-18", "2026-03-02",
+    "2026-05-05", "2026-05-25", "2026-06-06", "2026-07-17", "2026-08-17",
+    "2026-09-24", "2026-09-25", "2026-09-26", "2026-10-05", "2026-10-09", "2026-12-25",
+    // 2027
+    "2027-01-01", "2027-02-06", "2027-02-08", "2027-02-09", "2027-03-01",
+    "2027-05-05", "2027-05-13", "2027-06-06", "2027-07-19", "2027-08-16",
+    "2027-09-14", "2027-09-15", "2027-09-16", "2027-10-04", "2027-10-11", "2027-12-25"
+  ]);
+
   async function renderScheduleCalendar() {
     const year = scheduleCalDate.getFullYear();
     const month = scheduleCalDate.getMonth();
@@ -3155,16 +3419,22 @@
     }
     for (let day = 1; day <= daysInMonth; day++) {
       const dateStr = scheduleDateStr(year, month, day);
+      const weekday = new Date(year, month, day).getDay();
       const sched = scheduleMap.get(dateStr);
       const count = sched ? sched.siteIds.length : 0;
+      // 셀 배경(회색/파랑/노랑)은 그날의 방문 일정 상태를, 날짜 숫자 색(파랑/빨강)은 요일·공휴일을
+      // 나타낸다 - 서로 다른 정보라서 겹쳐도 각자 구분되게 클래스를 따로 둔다.
       const classes = ["schedule-day-cell"];
       if (count > 0) classes.push("has-schedule");
       if (sched && sched.confirmed) classes.push("is-confirmed");
       if (dateStr === today) classes.push("is-today");
       if (dateStr === scheduleSelectedDate) classes.push("is-selected");
+      const numClasses = ["schedule-day-num"];
+      if (weekday === 6) numClasses.push("is-sat");
+      if (weekday === 0 || KR_HOLIDAYS.has(dateStr)) numClasses.push("is-sun");
       cellsHtml += `
         <div class="${classes.join(" ")}" data-date="${dateStr}">
-          <span>${day}</span>
+          <span class="${numClasses.join(" ")}">${day}</span>
           ${count > 0 ? `<span class="schedule-day-count">${count}곳</span>` : ""}
         </div>
       `;
@@ -3198,10 +3468,16 @@
     if (siteIds.length === 0) {
       list.innerHTML = `<div class="empty-state">아래 업체 목록에서 선택 후 "확인"을 누르면 여기에 표시됩니다.</div>`;
     } else {
-      list.innerHTML = siteIds.map((id) => `
+      // 방문 순서(번호)를 직접 매길 수 있게 ▲▼로 배열 순서를 바꾼다 - 하루에 여러 업체를 도는 경우
+      // 실제로 돌 순서대로 정렬해두면 편하다(사용자 요청). 순서는 siteIds 배열 순서 그대로.
+      list.innerHTML = siteIds.map((id, idx) => `
         <div class="schedule-day-company-chip">
-          <span>${escapeHtml(siteMap.has(id) ? siteMap.get(id).name : "삭제된 업체")}</span>
-          <button type="button" data-remove="${id}">×</button>
+          <div class="schedule-day-company-reorder">
+            <button type="button" class="schedule-reorder-btn" data-move="up" data-idx="${idx}" ${idx === 0 ? "disabled" : ""}>▲</button>
+            <button type="button" class="schedule-reorder-btn" data-move="down" data-idx="${idx}" ${idx === siteIds.length - 1 ? "disabled" : ""}>▼</button>
+          </div>
+          <span class="schedule-day-company-name">${idx + 1}. ${escapeHtml(siteMap.has(id) ? siteMap.get(id).name : "삭제된 업체")}</span>
+          <button type="button" class="schedule-day-company-remove" data-remove="${id}">×</button>
         </div>
       `).join("");
       $$("#scheduleDayCompanyList [data-remove]").forEach((btn) => {
@@ -3213,31 +3489,33 @@
           toast("삭제했습니다.");
         });
       });
+      $$("#scheduleDayCompanyList [data-move]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const idx = parseInt(btn.dataset.idx, 10);
+          const newIdx = idx + (btn.dataset.move === "up" ? -1 : 1);
+          if (newIdx < 0 || newIdx >= siteIds.length) return;
+          const reordered = siteIds.slice();
+          [reordered[idx], reordered[newIdx]] = [reordered[newIdx], reordered[idx]];
+          await FireDB.setScheduleSiteIds(date, reordered);
+          await renderScheduleDayDetail();
+        });
+      });
     }
 
     $("#btnScheduleConfirm").classList.toggle("hidden", siteIds.length === 0 || confirmed);
     $("#btnScheduleUnconfirm").classList.toggle("hidden", !confirmed);
   }
 
-  // 업체 선택 목록은 클릭 즉시 저장하지 않고 scheduleStagedIds(임시 체크 상태)만 바꾼다 -
-  // 실제로 그 날짜의 예정 업체로 저장되는 시점은 "확인" 버튼을 눌렀을 때뿐이다.
-  async function renderScheduleCompanyPickList() {
-    const sites = await FireDB.getAllSites();
-    const term = scheduleCompanySearchTerm.trim();
-    const filtered = (term ? sites.filter((s) => s.name.includes(term)) : sites)
-      .sort((a, b) => a.name.localeCompare(b.name, "ko"));
-
-    const list = $("#scheduleCompanyPickList");
-    if (filtered.length === 0) {
-      list.innerHTML = `<div class="empty-state">${term ? "검색 결과가 없습니다." : "등록된 업체가 없습니다."}</div>`;
-      return;
-    }
-    list.innerHTML = filtered.map((s) => `
-      <div class="schedule-company-pick-row ${scheduleStagedIds.has(s.id) ? "is-added" : ""}" data-id="${s.id}">
-        ${scheduleStagedIds.has(s.id) ? "☑" : "☐"} ${escapeHtml(s.name)}
+  function scheduleCompanyPickRowHtml(s) {
+    const checked = scheduleStagedIds.has(s.id);
+    return `
+      <div class="schedule-company-pick-row ${checked ? "is-added" : ""}" data-id="${s.id}">
+        ${checked ? "☑" : "☐"} ${escapeHtml(s.name)}
       </div>
-    `).join("");
-    $$("#scheduleCompanyPickList .schedule-company-pick-row").forEach((el) => {
+    `;
+  }
+  function bindScheduleCompanyPickRowClicks(container) {
+    Array.from(container.querySelectorAll(".schedule-company-pick-row")).forEach((el) => {
       el.addEventListener("click", () => {
         const id = el.dataset.id;
         if (scheduleStagedIds.has(id)) scheduleStagedIds.delete(id);
@@ -3246,6 +3524,91 @@
       });
     });
   }
+
+  // 업체 선택 목록은 클릭 즉시 저장하지 않고 scheduleStagedIds(임시 체크 상태)만 바꾼다 -
+  // 실제로 그 날짜의 예정 업체로 저장되는 시점은 "확인" 버튼을 눌렀을 때뿐이다. 검색어가 있으면
+  // 정렬/지역/이번달 상태와 무관하게 이름으로만 걸러진 평평한 목록을 보여준다(검색이 우선).
+  async function renderScheduleCompanyPickList() {
+    $("#btnSchedulePickSortByName").classList.toggle("active", schedulePickSortMode === "name");
+    $("#btnSchedulePickSortByRegion").classList.toggle("active", schedulePickSortMode === "region");
+    $("#btnSchedulePickFilterThisMonth").classList.toggle("active", schedulePickMonthOnly);
+
+    const allSites = await FireDB.getAllSites();
+    allSites.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+    const sites = schedulePickMonthOnly ? allSites.filter(isSiteInCurrentMonth) : allSites;
+
+    const list = $("#scheduleCompanyPickList");
+    const term = scheduleCompanySearchTerm.trim();
+    if (term) {
+      const filtered = sites.filter((s) => s.name.includes(term));
+      list.innerHTML = filtered.length === 0
+        ? `<div class="empty-state">검색 결과가 없습니다.</div>`
+        : filtered.map(scheduleCompanyPickRowHtml).join("");
+      if (filtered.length > 0) bindScheduleCompanyPickRowClicks(list);
+      return;
+    }
+
+    if (sites.length === 0) {
+      list.innerHTML = `<div class="empty-state">${schedulePickMonthOnly ? "이번 달 종합점검/작동점검 대상 거래처가 없습니다." : "등록된 업체가 없습니다."}</div>`;
+      return;
+    }
+
+    if (schedulePickSortMode === "region") {
+      if (schedulePickSelectedRegion) {
+        const filtered = sites.filter((s) => classifyRegion(s.address) === schedulePickSelectedRegion);
+        const backBtnHtml = `<button class="btn btn-secondary region-back-row" type="button">← 지역 목록으로 (${escapeHtml(schedulePickSelectedRegion)})</button>`;
+        list.innerHTML = filtered.length === 0
+          ? `${backBtnHtml}<div class="empty-state">이 지역에 등록된 현장이 없습니다.</div>`
+          : backBtnHtml + filtered.map(scheduleCompanyPickRowHtml).join("");
+        if (filtered.length > 0) bindScheduleCompanyPickRowClicks(list);
+        list.querySelector(".region-back-row").addEventListener("click", () => {
+          schedulePickSelectedRegion = null;
+          renderScheduleCompanyPickList();
+        });
+        return;
+      }
+      const counts = new Map();
+      sites.forEach((s) => {
+        const region = classifyRegion(s.address);
+        counts.set(region, (counts.get(region) || 0) + 1);
+      });
+      const daeguOrder = DAEGU_DISTRICTS.filter((g) => counts.has(g));
+      const otherOrder = PROVINCE_PATTERNS.map(([, label]) => label).filter((l) => l !== "대구" && counts.has(l));
+      const orderedRegions = [...daeguOrder, ...otherOrder];
+      if (counts.has("대구 기타")) orderedRegions.push("대구 기타");
+      if (counts.has("지역 미상")) orderedRegions.push("지역 미상");
+      list.innerHTML = `<div class="region-grid">${orderedRegions.map((r) => `
+        <button class="region-btn" data-region="${escapeHtml(r)}" type="button">
+          <span class="region-btn-name">${escapeHtml(r)}</span>
+          <span class="region-btn-count">${counts.get(r)}개</span>
+        </button>
+      `).join("")}</div>`;
+      Array.from(list.querySelectorAll(".region-btn")).forEach((btn) => {
+        btn.addEventListener("click", () => {
+          schedulePickSelectedRegion = btn.dataset.region;
+          renderScheduleCompanyPickList();
+        });
+      });
+      return;
+    }
+
+    list.innerHTML = sites.map(scheduleCompanyPickRowHtml).join("");
+    bindScheduleCompanyPickRowClicks(list);
+  }
+
+  $("#btnSchedulePickSortByName").addEventListener("click", () => {
+    schedulePickSortMode = "name";
+    schedulePickSelectedRegion = null;
+    renderScheduleCompanyPickList();
+  });
+  $("#btnSchedulePickSortByRegion").addEventListener("click", () => {
+    schedulePickSortMode = "region";
+    renderScheduleCompanyPickList();
+  });
+  $("#btnSchedulePickFilterThisMonth").addEventListener("click", () => {
+    schedulePickMonthOnly = !schedulePickMonthOnly;
+    renderScheduleCompanyPickList();
+  });
 
   async function refreshScheduleManage() {
     await Promise.all([renderScheduleCalendar(), renderScheduleDayDetail(), renderScheduleCompanyPickList()]);
