@@ -449,6 +449,13 @@ a.list-card { display: block; text-decoration: none; color: inherit; }
 .list-card-sub { font-size: 14.5px; color: var(--text-dim); margin-top: 5px; }
 .list-card-static { cursor: default; }
 
+/* 일정관리 화면 전용 - 다른 화면보다 글자를 한 단계 더 키우고 진하게(사용자 요청 - 가독성). */
+#screen-route .card h2 { font-size: 21px; }
+#screen-route .list-card-title { font-size: 20px; }
+#screen-route .list-card-sub { font-size: 16.5px; font-weight: 600; color: var(--text); }
+#screen-route .badge { font-size: 15px; padding: 6px 14px; }
+#screen-route .hint-text { font-size: 15.5px; }
+
 .list-card-menu-btn {
   flex-shrink: 0;
   width: 32px;

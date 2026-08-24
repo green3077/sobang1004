@@ -53,7 +53,21 @@ const KakaoLocal = (() => {
     }));
   }
 
-  // 주소 하나로 바로 근처 맛집까지 - 화면에서 쓰는 진입점.
+  // 카카오 로컬 API는 가격 정보를 제공하지 않는다 - "1인 1만원 이하"를 정확히 걸러낼 방법이
+  // 없어서, 대신 이름만으로도 보통 비싼 축에 드는 카테고리(고기/횟집/오마카세 등)를 걸러내는
+  // 방식으로 최대한 저렴한 식당 위주로 추천한다(완벽한 가격 필터는 아님).
+  const EXPENSIVE_CATEGORY_KEYWORDS = [
+    "고기", "횟집", "참치", "일식", "오마카세", "스테이크", "브런치", "한우",
+    "장어", "전복", "코스요리", "이자카야", "요리주점", "샤브샤브", "뷔페"
+  ];
+
+  function filterAffordable(restaurants) {
+    const cheap = restaurants.filter((r) => !EXPENSIVE_CATEGORY_KEYWORDS.some((kw) => r.category.includes(kw)));
+    return cheap.length ? cheap : restaurants; // 다 걸러지면 아예 안 보여주는 것보단 원래 목록을 보여준다.
+  }
+
+  // 주소 하나로 바로 근처 맛집까지 - 화면에서 쓰는 진입점. 저렴해 보이는 곳 위주로 넉넉히 뽑은 뒤
+  // 걸러서 limit개만 돌려준다.
   async function recommendNearAddress(address, radius, limit) {
     const coord = await geocodeAddress(address);
     if (!coord) {
@@ -61,7 +75,9 @@ const KakaoLocal = (() => {
       err.code = "address_not_found";
       throw err;
     }
-    return searchNearbyRestaurants(coord.x, coord.y, radius, limit);
+    const size = Math.min(15, Math.max((limit || 3) * 5, 15));
+    const found = await searchNearbyRestaurants(coord.x, coord.y, radius, size);
+    return filterAffordable(found).slice(0, limit || 3);
   }
 
   return { getKey, saveKey, geocodeAddress, searchNearbyRestaurants, recommendNearAddress };
