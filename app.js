@@ -2,6 +2,7 @@
 (() => {
   let editingSiteId = null;
   let currentSiteId = null;      // 현장 상세 화면에서 보고 있는 현장
+  let currentInspectionId = null; // 점검 상세/사진 갤러리 화면에서 보고 있는 점검 회차(날짜)
   let currentConstructionSiteId = null;  // 공사팀에서 보고 있는 업체(=현장)
   let activeObjectUrls = [];
   let pendingAttachments = [];   // 신규 현장 등록 시 아직 저장 전인 첨부파일 (저장 시점에 실제 siteId로 옮겨 담음)
@@ -364,6 +365,19 @@
     return `<span class="inspection-schedule-badge">${comp} · 작동 ${sched.operationalMonth}월</span>`;
   }
 
+  // 점검 회차(날짜)가 작동점검인지 종합점검인지 - computeInspectionMonths로 구한 현장별
+  // 종합/작동 대상월과 그 날짜의 월을 비교해서 판단한다. 대상월을 아직 모르면(사용승인일/종합점검대상
+  // 미입력) 기본값인 작동점검으로 표시.
+  function inspectionTypeForMonth(site, dateStr) {
+    const sched = computeInspectionMonths(site);
+    const month = parseInt((dateStr || todayISO()).slice(5, 7), 10);
+    if (sched) {
+      if (sched.comprehensiveMonth === month) return "종합점검";
+      if (sched.operationalMonth === month) return "작동점검";
+    }
+    return "작동점검";
+  }
+
   function showScreen(id) {
     $$(".screen").forEach((s) => s.classList.remove("active"));
     $("#" + id).classList.add("active");
@@ -382,6 +396,7 @@
     "screen-site-entry-choice": "btnCancelEntryChoice",
     "screen-site-form": "btnCancelSiteForm",
     "screen-site-detail": "btnBackToSites",
+    "screen-inspection-detail": "btnBackFromInspectionDetail",
     "screen-photo-gallery": "btnBackFromGallery",
     "screen-deficiency-rounds": "btnBackFromRounds",
     "screen-deficiencies": "btnBackFromDeficiencies",
@@ -718,17 +733,16 @@
     renderSites();
   });
 
-  // 방문 예약/이력(일정관리, 오늘의 할일, 마지막 점검일) 트리거 - 예전엔 체크리스트를 여는 것 자체가 트리거였으나
-  // 체크리스트가 사진 갤러리로 대체되면서, 이제 "현장점검 사진" 갤러리를 여는 것이 같은 역할을 한다.
-  async function getOrCreateActiveInspection(siteId) {
+  // 방문 예약/이력(일정관리, 오늘의 할일, 마지막 점검일) 트리거 - "점검하기" 버튼을 누르면 그 날짜로
+  // 점검 기록을 하나 만들고(같은 날짜가 이미 있으면 그걸 재사용), 점검 이력 목록에 날짜별 탭으로 쌓인다.
+  async function getOrCreateInspectionForDate(siteId, dateStr, site) {
     const inspections = await FireDB.getInspectionsBySite(siteId);
-    const inProgress = inspections.filter((i) => i.status !== "completed");
-    inProgress.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
-    if (inProgress.length > 0) return inProgress[0];
+    const existing = inspections.find((i) => i.scheduledDate === dateStr);
+    if (existing) return existing;
     const insp = {
       siteId,
-      type: "작동점검",
-      scheduledDate: todayISO(),
+      type: inspectionTypeForMonth(site, dateStr),
+      scheduledDate: dateStr,
       inspector: "",
       status: "scheduled",
       completedDate: null,
@@ -1279,16 +1293,34 @@
       </div>
     `).join("");
 
+    $("#siteTodayDateLabel").textContent = formatDateWithWeekday(todayISO());
+
     const inspections = await FireDB.getInspectionsBySite(id);
     inspections.sort((a, b) => (b.scheduledDate || "").localeCompare(a.scheduledDate || ""));
     const listEl = $("#siteInspectionsList");
     if (inspections.length === 0) {
-      listEl.innerHTML = `<div class="empty-state">점검 이력이 없습니다.</div>`;
+      listEl.innerHTML = `<div class="empty-state">점검 이력이 없습니다. "점검하기"를 눌러 오늘 방문을 시작하세요.</div>`;
     } else {
       listEl.innerHTML = inspections.map((i) => inspectionCardHtml(i, site)).join("");
+      $$("#siteInspectionsList .list-card").forEach((el) => {
+        el.addEventListener("click", () => openInspectionDetail(el.dataset.id));
+      });
     }
     showScreen("screen-site-detail");
   }
+
+  function formatDateWithWeekday(dateStr) {
+    const d = new Date(dateStr + "T00:00:00");
+    if (isNaN(d.getTime())) return dateStr;
+    return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 (${WEEKDAY_LABEL[d.getDay()]})`;
+  }
+
+  $("#btnStartInspection").addEventListener("click", async () => {
+    if (!currentSiteId) return;
+    const site = await FireDB.getSite(currentSiteId);
+    const insp = await getOrCreateInspectionForDate(currentSiteId, todayISO(), site);
+    await openInspectionDetail(insp.id);
+  });
 
   $("#btnBackToSites").addEventListener("click", () => { renderSites(); showScreen("screen-sites"); });
 
@@ -1342,10 +1374,7 @@
     showScreen("screen-sites");
   });
 
-  $("#btnOpenSiteGallery").addEventListener("click", () => openPhotoGallery(currentSiteId, "site"));
-  $("#btnOpenDeficiencyGallery").addEventListener("click", () => openPhotoGallery(currentSiteId, "deficiency"));
-
-  // ================= 점검 목록 (일정관리 표시용 방문 이력 - 조회 전용) =================
+  // ================= 점검 목록 (거래처 상세의 날짜별 점검 탭) =================
   function computeStatus(insp) {
     if (insp.status === "completed") return "completed";
     if (insp.scheduledDate && insp.scheduledDate < todayISO()) return "overdue";
@@ -1356,53 +1385,59 @@
 
   function inspectionCardHtml(insp, site) {
     const st = computeStatus(insp);
+    const typeLabel = inspectionTypeForMonth(site, insp.scheduledDate);
     return `
-      <div class="list-card list-card-static">
+      <div class="list-card" data-id="${insp.id}">
         <div class="list-card-title">
-          <span>${escapeHtml(site ? site.name : "")}</span>
+          <span>${escapeHtml(insp.scheduledDate || "")}</span>
           <span class="badge badge-${st}">${STATUS_LABEL[st]}</span>
         </div>
-        <div class="list-card-sub">${escapeHtml(insp.type)} · ${escapeHtml(insp.scheduledDate || "")}</div>
-        <div class="list-card-sub">${escapeHtml(insp.inspector ? "점검자: " + insp.inspector : "")}</div>
+        <div class="list-card-sub">${escapeHtml(typeLabel)}${insp.inspector ? " · 점검자: " + escapeHtml(insp.inspector) : ""}</div>
       </div>
     `;
   }
 
-  // ================= 사진 갤러리 (현장점검 사진 / 지적사항 사진 공용) =================
-  // 현장점검 사진: siteId로만 귀속되는 photos 레코드(itemId를 이 상수로 표시) - 지적사항과 마찬가지로 점검 기록과 무관.
-  // 지적사항 사진: 기존 지적사항 이행전/이행후 개별 업로드(itemId=지적사항 id)를 한곳에 모아 보여주기만 하는 조회 전용 화면.
-  const SITE_GALLERY_ITEM_ID = "site-gallery";
-  let galleryMode = null;              // "site" | "deficiency"
-  let galleryActiveInspectionId = null; // "site" 모드에서 방문 완료 처리 대상 점검 id
+  // 점검 이력 목록에서 날짜 하나를 눌렀을 때: 그 회차의 정보와 "현장점검 사진" 버튼을 보여준다.
+  async function openInspectionDetail(inspId) {
+    const insp = await FireDB.getInspection(inspId);
+    if (!insp) { openSiteDetail(currentSiteId); return; }
+    currentInspectionId = inspId;
+    currentSiteId = insp.siteId;
+    const site = await FireDB.getSite(insp.siteId);
+    const st = computeStatus(insp);
+    $("#inspectionDetailInfo").innerHTML = `
+      <h2>${escapeHtml(site ? site.name : "")}</h2>
+      <div class="report-meta-row"><span class="label">날짜</span><span>${escapeHtml(insp.scheduledDate || "")}</span></div>
+      <div class="report-meta-row"><span class="label">종류</span><span>${escapeHtml(inspectionTypeForMonth(site, insp.scheduledDate))}</span></div>
+      <div class="report-meta-row"><span class="label">상태</span><span class="badge badge-${st}">${STATUS_LABEL[st]}</span></div>
+    `;
+    showScreen("screen-inspection-detail");
+  }
+
+  $("#btnOpenInspectionGallery").addEventListener("click", () => openPhotoGallery(currentInspectionId));
+  $("#btnBackFromInspectionDetail").addEventListener("click", () => openSiteDetail(currentSiteId));
+
+  // ================= 사진 갤러리 (점검 회차별 현장점검 사진) =================
+  let galleryActiveInspectionId = null; // 현재 갤러리가 속한 점검 회차 id - 사진은 이 id로 귀속되고, "방문 완료 처리"도 이 회차를 대상으로 함
   let galleryPhotos = [];              // [{id, blob, createdAt, ...}]
   let gallerySelected = new Set();
   let galleryViewerIndex = -1;
 
-  async function openPhotoGallery(siteId, mode) {
-    currentSiteId = siteId;
-    galleryMode = mode;
-    galleryActiveInspectionId = null;
+  async function openPhotoGallery(inspectionId) {
+    galleryActiveInspectionId = inspectionId;
     gallerySelected = new Set();
-    if (mode === "site") {
-      const insp = await getOrCreateActiveInspection(siteId);
-      galleryActiveInspectionId = insp.id;
-    }
-    const site = await FireDB.getSite(siteId);
-    $("#galleryTitle").textContent = `${site ? site.name : ""} · ${mode === "site" ? "현장점검 사진" : "지적사항 사진"}`;
-    $("#galleryHint").textContent = mode === "site"
-      ? "현장 사진을 여러 장 올릴 수 있습니다. 사진을 누르면 원본이 크게 보이고, 선택해서 외부로 공유할 수 있습니다."
-      : "지적사항에 등록된 이행전/이행후 사진을 한곳에 모아 봅니다. 선택해서 외부로 공유할 수 있습니다.";
-    $("#btnGalleryUpload").classList.toggle("hidden", mode !== "site");
-    $("#btnCompleteSiteVisit").classList.toggle("hidden", mode !== "site");
+    const insp = await FireDB.getInspection(inspectionId);
+    currentSiteId = insp ? insp.siteId : currentSiteId;
+    const site = await FireDB.getSite(currentSiteId);
+    $("#galleryTitle").textContent = `${site ? site.name : ""} · 현장점검 사진 (${insp ? insp.scheduledDate : ""})`;
+    $("#galleryHint").textContent = "현장 사진을 여러 장 올릴 수 있습니다. 사진을 누르면 원본이 크게 보이고, 선택해서 외부로 공유할 수 있습니다.";
     await loadGalleryPhotos();
     showScreen("screen-photo-gallery");
   }
 
   async function loadGalleryPhotos() {
-    const all = await FireDB.getPhotosBySite(currentSiteId);
-    galleryPhotos = all
-      .filter((p) => (galleryMode === "site") === (p.itemId === SITE_GALLERY_ITEM_ID))
-      .sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
+    const all = await FireDB.getPhotosByInspection(galleryActiveInspectionId);
+    galleryPhotos = all.slice().sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
     gallerySelected = new Set(Array.from(gallerySelected).filter((id) => galleryPhotos.some((p) => p.id === id)));
     renderGalleryGrid();
   }
@@ -1467,7 +1502,7 @@
         const uploadFile = await compressPhotoForUpload(file);
         const photo = await FireDB.addPhoto({
           siteId: currentSiteId,
-          itemId: SITE_GALLERY_ITEM_ID,
+          inspectionId: galleryActiveInspectionId,
           blob: uploadFile,
           createdAt: new Date().toISOString()
         });
@@ -1521,7 +1556,7 @@
     const selectedPhotos = galleryPhotos.filter((p) => gallerySelected.has(p.id));
     if (selectedPhotos.length === 0) return;
     const files = selectedPhotos.map((p, i) => new File([p.blob], galleryPhotoFilename(p, i), { type: p.blob.type || "image/jpeg" }));
-    await shareOrDownloadFiles(files, galleryMode === "site" ? "현장점검 사진" : "지적사항 사진");
+    await shareOrDownloadFiles(files, "현장점검 사진");
   });
 
   function openPhotoViewer(photoId) {
@@ -1539,7 +1574,7 @@
     $("#photoViewerImg").src = url;
     $("#btnPhotoViewerPrev").disabled = galleryViewerIndex <= 0;
     $("#btnPhotoViewerNext").disabled = galleryViewerIndex >= galleryPhotos.length - 1;
-    $("#btnDeleteViewerPhoto").classList.toggle("hidden", galleryMode !== "site");
+    $("#btnDeleteViewerPhoto").classList.remove("hidden");
   }
 
   function closePhotoViewer() {
@@ -1577,7 +1612,8 @@
 
   $("#btnBackFromGallery").addEventListener("click", () => {
     closePhotoViewer();
-    if (currentSiteId) openSiteDetail(currentSiteId);
+    if (currentInspectionId) openInspectionDetail(currentInspectionId);
+    else if (currentSiteId) openSiteDetail(currentSiteId);
     else { renderSites(); showScreen("screen-sites"); }
   });
 

@@ -617,9 +617,12 @@ input[readonly] { background: var(--neutral-bg); color: var(--text-dim); }
 .report-meta-row > span:last-child { flex: 1; min-width: 0; text-align: right; word-break: keep-all; overflow-wrap: break-word; }
 .report-item-note { color: var(--text-dim); margin-top: 5px; }
 
-/* 사진 갤러리 (현장점검 사진 / 지적사항 사진 공용) */
-.site-gallery-actions { display: flex; gap: 10px; }
-.site-gallery-actions .btn { margin-top: 0; }
+/* 거래처 상세: 거래처 정보 카드 바로 아래 "오늘 날짜 + 점검하기" 줄 */
+.site-start-inspection-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.site-start-inspection-row #siteTodayDateLabel { font-weight: 700; color: var(--text-dim); }
+.site-start-inspection-row .btn { margin-top: 0; }
+
+/* 사진 갤러리 (점검 회차별 현장점검 사진) */
 .gallery-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
 .gallery-toolbar .btn { margin-top: 0; flex: 1 1 auto; min-width: 120px; }
 .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; margin-bottom: 18px; }
