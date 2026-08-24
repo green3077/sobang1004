@@ -467,12 +467,12 @@
       list.innerHTML = `<div class="home-todo-empty">오늘 예정된 할일이 없습니다.</div>`;
       return;
     }
-    const inspectionCardsHtml = pending.map((insp) => {
+    const inspectionItems = pending.map((insp) => {
       const site = siteMap.get(insp.siteId);
       const isOverdue = insp.scheduledDate < today;
       const last = site ? lastBySite.get(site.id) : null;
       const lastDate = last ? (last.completedDate || last.scheduledDate) : "";
-      return `
+      const html = `
         <div class="home-todo-item ${isOverdue ? "is-overdue" : ""}" data-site-id="${insp.siteId}">
           <span class="home-todo-item-icon">${isOverdue ? "⚠️" : "🔔"}</span>
           <div class="home-todo-item-body">
@@ -483,12 +483,13 @@
           </div>
         </div>
       `;
-    }).join("");
-    const scheduleCardsHtml = confirmedSiteIds.map((id) => {
+      return { siteId: insp.siteId, html };
+    });
+    const scheduleItems = confirmedSiteIds.map((id) => {
       const site = siteMap.get(id);
       const last = lastBySite.get(id);
       const lastDate = last ? (last.completedDate || last.scheduledDate) : "";
-      return `
+      const html = `
         <div class="home-todo-item" data-site-id="${id}">
           <span class="home-todo-item-icon">📅</span>
           <div class="home-todo-item-body">
@@ -499,8 +500,19 @@
           </div>
         </div>
       `;
-    }).join("");
-    list.innerHTML = inspectionCardsHtml + scheduleCardsHtml;
+      return { siteId: id, html };
+    });
+    // 스케줄 관리(오늘 날짜)에서 정한 방문 순서 그대로 표시(사용자 요청) - 그 순서에 없는 항목
+    // (예: 여러 날짜 전부터 밀려온 기한초과 점검)은 순서 정보가 없으므로 뒤로 보내되, 그런
+    // 항목끼리는 원래 순서(기한초과 날짜순)를 그대로 유지한다.
+    const scheduleOrder = new Map((todaySchedule ? todaySchedule.siteIds : []).map((id, idx) => [id, idx]));
+    const items = [...inspectionItems, ...scheduleItems];
+    items.sort((a, b) => {
+      const ra = scheduleOrder.has(a.siteId) ? scheduleOrder.get(a.siteId) : Infinity;
+      const rb = scheduleOrder.has(b.siteId) ? scheduleOrder.get(b.siteId) : Infinity;
+      return ra - rb;
+    });
+    list.innerHTML = items.map((it) => it.html).join("");
     $$("#homeTodoList .home-todo-item").forEach((el) => {
       el.addEventListener("click", () => openSiteDetail(el.dataset.siteId));
     });
@@ -2154,27 +2166,23 @@
       return;
     }
 
-    // "지적사항 없음"은 회차마다 따로 기록된다(round.noDeficiency) - 각 회차는 자신이 실제로
-    // "없음"으로 확인됐는지만 보고, 최신 회차 여부와는 무관하게 그 표시를 유지한다.
-    const defsByRound = await Promise.all(rounds.map((r) => FireDB.getDeficienciesByRound(r.id)));
-    list.innerHTML = rounds.map((r, i) => {
-      const defs = defsByRound[i];
-      const open = defs.filter((d) => !d.resolved).length;
-      const resolved = defs.filter((d) => d.resolved).length;
-      const emptyBadge = r.noDeficiency
-        ? `<span class="badge badge-scheduled">지적사항 없음</span>`
-        : `<span class="badge badge-pending">검토중</span>`;
-      const badges = [
-        open > 0 ? `<span class="badge badge-open">미해결 ${open}</span>` : "",
-        resolved > 0 ? `<span class="badge badge-resolved">해결 ${resolved}</span>` : "",
-        (open === 0 && resolved === 0) ? emptyBadge : ""
-      ].join(" ");
+    // 날짜(요일)와 그 날짜의 점검 완료 여부만 보여준다(사용자 요청) - 지적사항 미해결/해결
+    // 개수 등은 회차 상세(openRoundDeficiencies)에 들어가면 보이므로 목록에서는 뺀다. 완료
+    // 여부는 지적사항이 아니라 그 날짜의 점검 회차(inspections, scheduledDate 일치) 상태를
+    // 그대로 따른다 - "점검 완료 처리"를 눌러야 반영되는 그 상태와 같은 값.
+    const siteInspections = await FireDB.getInspectionsBySite(currentDeficiencySiteId);
+    const inspByDate = new Map(siteInspections.map((insp) => [insp.scheduledDate, insp]));
+    list.innerHTML = rounds.map((r) => {
+      const d = r.date ? new Date(r.date + "T00:00:00") : null;
+      const dateLabel = d && !isNaN(d) ? `${r.date} (${WEEKDAY_LABEL[d.getDay()]})` : (r.date || "");
+      const insp = inspByDate.get(r.date);
+      const done = !!(insp && insp.status === "completed");
       return `
         <div class="list-card" data-round="${r.id}">
           <div class="list-card-title">
-            <span class="list-card-title-main">${escapeHtml(r.date || "")}</span>
+            <span class="list-card-title-main">${escapeHtml(dateLabel)}</span>
             <span class="list-card-title-right">
-              <span class="list-card-badges">${badges}</span>
+              <span class="badge badge-${done ? "completed" : "scheduled"}">${done ? "완료" : "예정"}</span>
               <button type="button" class="list-card-menu-btn" data-menu-btn>⋯</button>
             </span>
           </div>
@@ -2589,7 +2597,7 @@
   async function openCompletionReport() {
     revokeObjectUrls();
     const site = await FireDB.getSite(currentDeficiencySiteId);
-    const company = getCompanyProfile();
+    const company = await getCompanyProfile();
     const resolved = currentDeficiencies.filter((d) => d.resolved);
     // 이행조치 일자는 더 이상 자동 기록하지 않고, 실제 제출 시점에 손으로 적도록 항상 공란으로 둔다.
     const dateRange = ". . . ~ . . .";
@@ -2991,29 +2999,25 @@
   }
 
   // ================= 동선 =================
-  const COMPANY_KEY = "fireInspectionCompanyProfile";
   const DEFAULT_COMPANY = { name: "조은소방", address: "대구시 수성구 중동 551-49", phone: "", ceo: "", bizRegNo: "", licenseNo: "" };
 
-  function getCompanyProfile() {
-    try {
-      const raw = localStorage.getItem(COMPANY_KEY);
-      if (!raw) return { ...DEFAULT_COMPANY };
-      const parsed = JSON.parse(raw);
-      return {
-        name: parsed.name || DEFAULT_COMPANY.name,
-        address: parsed.address || DEFAULT_COMPANY.address,
-        phone: parsed.phone || "",
-        ceo: parsed.ceo || "",
-        bizRegNo: parsed.bizRegNo || "",
-        licenseNo: parsed.licenseNo || ""
-      };
-    } catch (e) {
-      return { ...DEFAULT_COMPANY };
-    }
+  // 업체 정보는 팀 전체가 공유하는 값이라 Firebase(공유 저장소)에 둔다 - 한 사람이 설정 탭에서
+  // 고치면 다른 사람 화면에도 바로 그 값으로 보인다(예전엔 기기별 localStorage라 서로 달랐음).
+  async function getCompanyProfile() {
+    const parsed = await FireDB.getCompanyProfile();
+    if (!parsed) return { ...DEFAULT_COMPANY };
+    return {
+      name: parsed.name || DEFAULT_COMPANY.name,
+      address: parsed.address || DEFAULT_COMPANY.address,
+      phone: parsed.phone || "",
+      ceo: parsed.ceo || "",
+      bizRegNo: parsed.bizRegNo || "",
+      licenseNo: parsed.licenseNo || ""
+    };
   }
 
-  function saveCompanyProfile(profile) {
-    localStorage.setItem(COMPANY_KEY, JSON.stringify(profile));
+  async function saveCompanyProfile(profile) {
+    return FireDB.saveCompanyProfile(profile);
   }
 
   async function renderRoute() {
@@ -3027,6 +3031,8 @@
   // 점검 회차(inspections, scheduledDate가 오늘인 것)가 있는지/완료 상태인지로 판단한다 - 아직
   // 회차가 없으면(점검 시작 전) "예정"으로 보이고, "점검완료"를 누르면 회차를 새로 만들면서
   // 동시에 완료 처리한다(체크리스트/사진을 굳이 안 열어봐도 방문했음만 빠르게 표시할 수 있도록).
+  // 표시 전용 - 완료 처리는 여기서 하지 않는다(거래처 상세/점검 상세 화면의 "✅ 점검 완료 처리"로만
+  // 하고, 여기는 그 결과를 그대로 반영해서 보여주기만 함, 사용자 요청).
   async function renderInspectionStatus() {
     const list = $("#inspectionStatusList");
     if (!list) return;
@@ -3050,22 +3056,9 @@
             <span>${idx + 1}. ${escapeHtml(site ? site.name : "삭제된 업체")}</span>
             <span class="badge badge-${done ? "completed" : "scheduled"}">${done ? "완료" : "예정"}</span>
           </div>
-          ${done ? "" : `<button type="button" class="btn btn-secondary" data-complete-site="${id}">✅ 점검완료</button>`}
         </div>
       `;
     }).join("");
-    $$("#inspectionStatusList [data-complete-site]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const id = btn.dataset.completeSite;
-        const site = siteMap.get(id);
-        const insp = await getOrCreateInspectionForDate(id, today, site);
-        await FireDB.updateInspection(insp.id, { status: "completed", completedDate: today });
-        await ensureDeficiencyRoundForDate(id, today);
-        toast(`${site ? site.name : "업체"} 점검완료 처리되었습니다.`, "success");
-        await renderInspectionStatus();
-        await renderNearbyRestaurants();
-      });
-    });
   }
 
   // 근처 맛집 추천 - "가장 최근에 점검완료한 업체"를 기준으로 카카오 로컬 API에서 근처 음식점
@@ -3165,7 +3158,7 @@
   }
 
   async function renderSettings() {
-    const profile = getCompanyProfile();
+    const profile = await getCompanyProfile();
     $("#companyName").value = profile.name;
     $("#companyAddress").value = profile.address;
     $("#companyPhone").value = profile.phone;
@@ -3226,8 +3219,8 @@
   // 확인 필요), 새 버전이 있으면 외부 브라우저로 APK 다운로드 URL을 열어 다운로드->설치를 대신 시작해준다.
   // version.js의 APP_VERSION은 마지막으로 웹 파일이 바뀐 실제 날짜/시간(한국시간)이고,
   // APP_VERSION_CODE/NAME은 APK를 새로 빌드해서 배포할 때만 올리는 별개의 버전 번호다.
-  const APP_VERSION_CODE = 38;
-  const APP_VERSION_NAME = "1.37";
+  const APP_VERSION_CODE = 39;
+  const APP_VERSION_NAME = "1.38";
   const UPDATE_MANIFEST_URL = "https://green3077.github.io/sobang1004/version.json";
   const IS_NATIVE_UPDATE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
   // 이 프로젝트는 번들러(webpack/vite 등)를 쓰지 않는 순수 스크립트 앱이라 @capacitor/core 전체가
@@ -3321,7 +3314,7 @@
       FireDB.getAllDeficiencies(),
       FireDB.getAllSchedules(),
     ]);
-    return { version: 1, exportedAt: new Date().toISOString(), company: getCompanyProfile(), sites, inspections, deficiencies, schedules };
+    return { version: 1, exportedAt: new Date().toISOString(), company: await getCompanyProfile(), sites, inspections, deficiencies, schedules };
   }
 
   function backupFilenameDate() {
@@ -3387,7 +3380,7 @@
         await FireDB.setScheduleSiteIds(sched.id, sched.siteIds || []);
         await FireDB.setScheduleConfirmed(sched.id, !!sched.confirmed);
       }
-      if (data.company) saveCompanyProfile(data.company);
+      if (data.company) await saveCompanyProfile(data.company);
 
       $("#backupStatus").textContent = `복구 완료: ${latest.name}`;
       toast(`복구 완료 (백업 파일: ${latest.name})`, "success");
@@ -3409,15 +3402,15 @@
     toast("로그아웃되었습니다.");
   });
 
-  $("#btnSaveCompany").addEventListener("click", () => {
+  $("#btnSaveCompany").addEventListener("click", async () => {
     const name = $("#companyName").value.trim() || DEFAULT_COMPANY.name;
     const address = $("#companyAddress").value.trim() || DEFAULT_COMPANY.address;
     const phone = $("#companyPhone").value.trim();
     const ceo = $("#companyCeo").value.trim();
     const bizRegNo = $("#companyBizRegNo").value.trim();
     const licenseNo = $("#companyLicenseNo").value.trim();
-    saveCompanyProfile({ name, address, phone, ceo, bizRegNo, licenseNo });
-    toast("업체 정보가 저장되었습니다.");
+    await saveCompanyProfile({ name, address, phone, ceo, bizRegNo, licenseNo });
+    toast("업체 정보가 저장되었습니다. (다른 사람에게도 바로 적용됩니다)");
   });
 
   // ================= 스케줄 관리 (날짜별 방문 예정/확정 업체) =================

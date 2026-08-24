@@ -329,6 +329,13 @@ const FireDB = (() => {
       const existing = await getScheduleByDate(date);
       if (!existing) return null;
       return fbSet(`schedules/${date}`, { ...existing, confirmed });
+    },
+
+    // 업체 정보(회사명/주소/전화/대표이사/사업자등록번호/면허번호) - 팀 전체가 같은 값을 보도록
+    // 공유 저장소에 둔다(기존엔 기기별 localStorage라 한 사람이 고쳐도 다른 사람 화면엔 안 보였음).
+    getCompanyProfile: () => fbGet("companyProfile"),
+    async saveCompanyProfile(profile) {
+      return fbSet("companyProfile", profile);
     }
   };
 

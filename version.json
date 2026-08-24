@@ -1,6 +1,6 @@
 {
-  "versionCode": 38,
-  "versionName": "1.37",
+  "versionCode": 39,
+  "versionName": "1.38",
   "apkUrl": "https://green3077.github.io/sobang1004/fire-inspection.apk",
-  "notes": "일정관리에 '오늘의 점검현황'(스케줄 순서대로, 그 자리에서 점검완료 처리) 추가, 근처 맛집 추천(카카오 로컬 API, 설정 탭에서 키 등록 필요) 추가"
+  "notes": "일정관리 점검현황은 표시 전용으로 변경, 홈 화면 오늘의 할일이 스케줄 순서대로 정렬, 지적사항 회차 목록이 날짜(요일)+예정/완료로 표시, 근처 맛집 추천 실사용 키 적용, 업체 정보가 팀 전체 공유로 전환"
 }
