@@ -1,6 +1,6 @@
 {
-  "versionCode": 33,
-  "versionName": "1.32",
+  "versionCode": 34,
+  "versionName": "1.33",
   "apkUrl": "https://green3077.github.io/sobang1004/fire-inspection.apk",
-  "notes": "회차별 '지적사항 없음' 상태를 회차마다 따로 저장하도록 수정 - 새 회차를 추가해도 이전 회차의 '지적사항 없음' 표시가 '검토중'으로 바뀌지 않음"
+  "notes": "현장점검 사진을 모바일에서 올리면 다른 기기/PC에서도 볼 수 있도록 수정 (구글 드라이브 백업본에서 자동으로 찾아와 채움)"
 }
