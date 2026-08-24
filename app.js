@@ -3037,8 +3037,6 @@
     $("#routeHeaderTitle").textContent = `일정관리 ${todayISO()} (${WEEKDAY_LABEL[d.getDay()]})`;
     await renderScheduleAgenda();
     await renderInspectionStatus();
-    $("#nearbyRestaurantPicker").classList.add("hidden");
-    $("#nearbyRestaurantResults").innerHTML = "";
   }
 
   // 오늘의 점검현황 - "스케줄 관리"에서 정한 오늘 방문 순서(schedules/오늘날짜.siteIds) 그대로
@@ -3076,79 +3074,6 @@
         </div>
       `;
     }).join("");
-  }
-
-  // 근처 맛집 추천 - "가장 최근에 점검완료한 업체"를 기준으로 카카오 로컬 API에서 근처 음식점
-  // 3곳을 거리순으로 가져온다(사용자 요청 - 방문을 마친 근처에서 식사할 곳을 바로 찾기 위함).
-  // 근처 맛집 추천 - 버튼을 눌러야 "어느 업체 주변을 볼지" 고르는 목록이 뜨고, 업체를 선택하면
-  // 그 주변 음식점을 보여준다(사용자 요청, 자동 선택 대신 직접 고르는 방식으로 변경). 고를 업체
-  // 목록은 오늘 스케줄에 등록된 순서를 그대로 쓰고, 오늘 스케줄이 비어있으면 전체 거래처를
-  // 가나다순으로 보여준다.
-  async function showNearbyRestaurantPicker() {
-    const picker = $("#nearbyRestaurantPicker");
-    const list = $("#nearbyRestaurantPickList");
-    $("#nearbyRestaurantResults").innerHTML = "";
-    const today = todayISO();
-    const [sched, sites] = await Promise.all([FireDB.getScheduleByDate(today), FireDB.getAllSites()]);
-    const siteMap = new Map(sites.map((s) => [s.id, s]));
-    let pickSites = ((sched && sched.confirmed) ? sched.siteIds : []).map((id) => siteMap.get(id)).filter(Boolean);
-    if (pickSites.length === 0) {
-      pickSites = sites.slice().sort((a, b) => a.name.localeCompare(b.name, "ko"));
-    }
-    list.innerHTML = pickSites.length === 0
-      ? `<div class="empty-state">등록된 거래처가 없습니다.</div>`
-      : pickSites.map((s) => `
-        <div class="list-card" data-site="${s.id}">
-          <div class="list-card-title"><span>${escapeHtml(s.name)}</span></div>
-          ${s.address ? `<div class="list-card-sub">${escapeHtml(s.address)}</div>` : ""}
-        </div>
-      `).join("");
-    $$("#nearbyRestaurantPickList .list-card").forEach((el) => {
-      el.addEventListener("click", () => loadNearbyRestaurantsFor(el.dataset.site));
-    });
-    picker.classList.remove("hidden");
-    picker.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-
-  $("#btnNearbyRestaurants").addEventListener("click", () => showNearbyRestaurantPicker().catch(reportLoadFailure));
-
-  async function loadNearbyRestaurantsFor(siteId) {
-    const results = $("#nearbyRestaurantResults");
-    $("#nearbyRestaurantPicker").classList.add("hidden");
-    const site = await FireDB.getSite(siteId);
-    if (!site) return;
-    if (!site.address) {
-      results.innerHTML = `<div class="empty-state">${escapeHtml(site.name)}의 주소가 등록되어 있지 않습니다.</div>`;
-      return;
-    }
-    if (!KakaoLocal.getKey()) {
-      results.innerHTML = `<div class="empty-state">설정 탭에서 맛집 추천 API 키를 입력하면 이용할 수 있습니다.</div>`;
-      return;
-    }
-    results.innerHTML = `<div class="empty-state">불러오는 중...</div>`;
-    try {
-      const restaurants = await KakaoLocal.recommendNearAddress(site.address, 1500, 3);
-      const header = `
-        <div class="list-card-sub" style="margin-bottom:12px;">"${escapeHtml(site.name)}" 근처</div>
-        <button type="button" class="btn btn-secondary" id="btnPickAnotherSite">🔁 다른 업체 선택</button>
-      `;
-      const body = restaurants.length === 0
-        ? `<div class="empty-state">근처에 음식점 정보가 없습니다.</div>`
-        : restaurants.map((r) => `
-          <a class="list-card" href="${r.url}" target="_blank" rel="noopener">
-            <div class="list-card-title">
-              <span>${escapeHtml(r.name)}</span>
-              <span class="badge badge-scheduled">${r.distance}m</span>
-            </div>
-            <div class="list-card-sub">${escapeHtml(r.category)}${r.phone ? " · " + escapeHtml(r.phone) : ""}</div>
-            <div class="list-card-sub">${escapeHtml(r.address)}</div>
-          </a>
-        `).join("");
-      results.innerHTML = header + body;
-      $("#btnPickAnotherSite").addEventListener("click", () => showNearbyRestaurantPicker().catch(reportLoadFailure));
-    } catch (e) {
-      results.innerHTML = `<div class="empty-state">맛집 정보를 불러오지 못했습니다 (${escapeHtml((e && e.message) || "")})</div>`;
-    }
   }
 
   async function renderScheduleAgenda() {
@@ -3217,7 +3142,6 @@
     const apiKeys = BldReg.getKeys();
     $("#jusoApiKey").value = apiKeys.jusoKey || "";
     $("#dataGoKrApiKey").value = apiKeys.dataGoKrKey || "";
-    $("#kakaoApiKey").value = KakaoLocal.getKey();
     $("#aiEnabledToggle").checked = AiFill.isEnabled();
     $("#changeHistoryEnabledToggle").checked = isChangeHistoryVisible();
     renderDriveStatus();
@@ -3268,8 +3192,8 @@
   // 확인 필요), 새 버전이 있으면 외부 브라우저로 APK 다운로드 URL을 열어 다운로드->설치를 대신 시작해준다.
   // version.js의 APP_VERSION은 마지막으로 웹 파일이 바뀐 실제 날짜/시간(한국시간)이고,
   // APP_VERSION_CODE/NAME은 APK를 새로 빌드해서 배포할 때만 올리는 별개의 버전 번호다.
-  const APP_VERSION_CODE = 43;
-  const APP_VERSION_NAME = "1.42";
+  const APP_VERSION_CODE = 44;
+  const APP_VERSION_NAME = "1.43";
   const UPDATE_MANIFEST_URL = "https://green3077.github.io/sobang1004/version.json";
   const IS_NATIVE_UPDATE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
   // 이 프로젝트는 번들러(webpack/vite 등)를 쓰지 않는 순수 스크립트 앱이라 @capacitor/core 전체가
@@ -3333,11 +3257,6 @@
       dataGoKrKey: $("#dataGoKrApiKey").value.trim()
     });
     toast("API 키가 저장되었습니다.");
-  });
-
-  $("#btnSaveKakaoKey").addEventListener("click", () => {
-    KakaoLocal.saveKey($("#kakaoApiKey").value.trim());
-    toast("맛집 추천 API 키가 저장되었습니다.");
   });
 
   $("#aiEnabledToggle").addEventListener("change", (e) => {

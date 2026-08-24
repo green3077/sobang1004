@@ -25,7 +25,7 @@ CACHE_V="$(date '+%Y%m%d-%H%M')"
 sed -i "s/?v=[0-9]\{8\}-[0-9]\{4\}/?v=$CACHE_V/g" index.html
 
 cp index.html style.css app.js db.js auth.js firebase-config.js version.js \
-   import.js client-import.js bldreg.js kakao-local.js ai-fill.js hwpx-export.js drive.js ui.js www/
+   import.js client-import.js bldreg.js ai-fill.js hwpx-export.js drive.js ui.js www/
 mkdir -p www/templates
 cp templates/completion-report-template.hwpx www/templates/
 

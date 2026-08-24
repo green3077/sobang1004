@@ -1,6 +1,6 @@
 {
-  "versionCode": 43,
-  "versionName": "1.42",
+  "versionCode": 44,
+  "versionName": "1.43",
   "apkUrl": "https://green3077.github.io/sobang1004/fire-inspection.apk",
-  "notes": "일정관리에서 다른 날짜 예정 점검이 없을 때 안내 문구 대신 빈 칸으로 표시, 오늘의 점검현황을 색깔 있는 하나의 묶음으로 디자인, 근처 맛집 추천 안내 문구 삭제"
+  "notes": "일정관리에서 근처 맛집 추천 기능 삭제"
 }
