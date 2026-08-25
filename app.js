@@ -492,6 +492,12 @@
             <div class="home-todo-item-sub">${subLine}</div>
             <div class="home-todo-item-sub">마지막 점검일: ${lastDate ? escapeHtml(lastDate) : "이력 없음"}</div>
             ${site && site.equipmentMemo ? `<div class="home-todo-item-memo">📝 ${escapeHtml(site.equipmentMemo)}</div>` : ""}
+            ${site && (site.contactName || site.contactPhone) ? `
+              <div class="home-todo-item-sub site-card-phone-row">
+                <span>${site.contactName ? "담당자: " + escapeHtml(site.contactName) : "담당자 미입력"}</span>
+                ${site.contactPhone ? `<a class="btn-call" href="tel:${escapeHtml(site.contactPhone)}">📞 전화걸기</a>` : ""}
+              </div>
+            ` : ""}
           </div>
         </div>
       `;
@@ -509,6 +515,12 @@
             <div class="home-todo-item-sub">${escapeHtml(inspectionTypeForMonth(site, today))} · 오늘 방문 확정</div>
             <div class="home-todo-item-sub">마지막 점검일: ${lastDate ? escapeHtml(lastDate) : "이력 없음"}</div>
             ${site.equipmentMemo ? `<div class="home-todo-item-memo">📝 ${escapeHtml(site.equipmentMemo)}</div>` : ""}
+            ${site.contactName || site.contactPhone ? `
+              <div class="home-todo-item-sub site-card-phone-row">
+                <span>${site.contactName ? "담당자: " + escapeHtml(site.contactName) : "담당자 미입력"}</span>
+                ${site.contactPhone ? `<a class="btn-call" href="tel:${escapeHtml(site.contactPhone)}">📞 전화걸기</a>` : ""}
+              </div>
+            ` : ""}
           </div>
         </div>
       `;
@@ -527,6 +539,8 @@
     list.innerHTML = items.map((it) => it.html).join("");
     $$("#homeTodoList .home-todo-item").forEach((el) => {
       el.addEventListener("click", () => openSiteDetail(el.dataset.siteId));
+      const callBtn = el.querySelector(".btn-call");
+      if (callBtn) callBtn.addEventListener("click", (e) => e.stopPropagation());
     });
   }
 
