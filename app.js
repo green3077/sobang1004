@@ -2382,6 +2382,17 @@
       arr.push(d);
       defsByRound.set(d.roundId, arr);
     });
+    // "점검완료 처리"로 자동 생성된 회차에만 종합/작동 표시를 붙인다(사용자 요청) - "+ 등록"으로
+    // 수동으로 만든 회차는 실제 법정 점검(종합/작동) 방문이 아닐 수 있어 표시하지 않는다. 그
+    // 회차 날짜에 완료된 점검이 실제로 있는지로 구분한다(round.date를 나중에 수정해도 그
+    // 시점 기준으로 다시 판단되도록 플래그 대신 매번 조회).
+    const siteInspections = await FireDB.getInspectionsBySite(currentDeficiencySiteId);
+    const completedInspectionDates = new Set();
+    siteInspections.forEach((insp) => {
+      if (insp.status !== "completed") return;
+      if (insp.scheduledDate) completedInspectionDates.add(insp.scheduledDate);
+      if (insp.completedDate) completedInspectionDates.add(insp.completedDate);
+    });
     list.innerHTML = rounds.map((r) => {
       const d = r.date ? new Date(r.date + "T00:00:00") : null;
       const dateLabel = d && !isNaN(d) ? `${r.date} (${WEEKDAY_LABEL[d.getDay()]})` : (r.date || "");
@@ -2389,11 +2400,13 @@
       const open = roundDefs.filter((x) => !x.resolved).length;
       const resolved = roundDefs.filter((x) => x.resolved).length;
       const status = roundStatusBadge(r, open, resolved);
+      const typeLabel = completedInspectionDates.has(r.date) ? inspectionTypeForMonth(site, r.date) : "";
       return `
         <div class="list-card" data-round="${r.id}">
           <div class="list-card-title">
             <span class="list-card-title-main">${escapeHtml(dateLabel)}</span>
             <span class="list-card-title-right">
+              ${typeLabel ? `<span class="badge badge-neutral">${escapeHtml(typeLabel)}</span>` : ""}
               <span class="badge ${status.cls}">${status.label}</span>
               <button type="button" class="list-card-menu-btn" data-menu-btn>⋯</button>
             </span>

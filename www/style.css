@@ -875,6 +875,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .badge-open { background: var(--danger-bg); color: var(--danger); }
 .badge-resolved { background: var(--good-bg); color: var(--good); }
 .badge-pending { background: var(--warn-bg); color: var(--warn); }
+.badge-neutral { background: var(--neutral-bg); color: var(--accent-dark); }
 .entry-source-tag { font-size: 13px; color: var(--text-dim); margin-bottom: 8px; }
 
 /* 건축물대장 조회 */
