@@ -453,6 +453,27 @@
   // ---------- 홈 ----------
   const WEEKDAY_LABEL = ["일", "월", "화", "수", "목", "금", "토"];
 
+  // 날짜(캘린더 일자) 기준으로 연속되는 항목들을 그룹으로 묶는다 - 점검 이력/지적사항 회차
+  // 목록 둘 다 "며칠 연속 방문"을 테두리 하나로 보여주는 데 같이 쓴다(사용자 요청, 종합/작동
+  // 점검이 하루에 안 끝나고 2일 이상 걸리는 경우가 있어서). items는 이미 날짜 내림차순
+  // 정렬되어 있어야 하고, dateOf(item)은 그 항목의 "YYYY-MM-DD" 날짜 문자열을 반환해야 한다.
+  function groupConsecutiveByDate(items, dateOf) {
+    const groups = [];
+    let current = [];
+    items.forEach((item) => {
+      const prev = current[current.length - 1];
+      const prevDateStr = prev ? dateOf(prev) : null;
+      const curDateStr = dateOf(item);
+      const prevD = prevDateStr ? new Date(prevDateStr + "T00:00:00") : null;
+      const curD = curDateStr ? new Date(curDateStr + "T00:00:00") : null;
+      const isConsecutive = prevD && curD && !isNaN(prevD) && !isNaN(curD) && (prevD - curD) === 86400000;
+      if (!isConsecutive && current.length > 0) { groups.push(current); current = []; }
+      current.push(item);
+    });
+    if (current.length > 0) groups.push(current);
+    return groups;
+  }
+
   async function renderHomeTodo() {
     const today = todayISO();
     const now = new Date();
@@ -1593,7 +1614,20 @@
     if (inspections.length === 0) {
       listEl.innerHTML = `<div class="empty-state">점검 이력이 없습니다. "점검하기"를 눌러 오늘 방문을 시작하세요.</div>`;
     } else {
-      listEl.innerHTML = inspections.map((i) => inspectionCardHtml(i, site)).join("");
+      // 종합/작동점검이 하루에 안 끝나고 며칠 연속 걸리는 경우가 있어, 방문 날짜가 캘린더상
+      // 연속되면 테두리 하나로 묶고 위에 "시작일 ~ 종료일 (N일간)"을 붙인다(사용자 요청) -
+      // 지적사항 회차 목록과 같은 방식(groupConsecutiveByDate 공용).
+      listEl.innerHTML = groupConsecutiveByDate(inspections, (i) => i.scheduledDate).map((group) => {
+        if (group.length < 2) return inspectionCardHtml(group[0], site);
+        const endDate = group[0].scheduledDate;
+        const startDate = group[group.length - 1].scheduledDate;
+        return `
+          <div class="date-group">
+            <div class="date-group-header">${escapeHtml(startDate)} ~ ${escapeHtml(endDate)} (${group.length}일간)</div>
+            ${group.map((i) => inspectionCardHtml(i, site)).join("")}
+          </div>
+        `;
+      }).join("");
       Array.from(listEl.querySelectorAll(".list-card")).forEach((el) => {
         const inspId = el.dataset.id;
         el.addEventListener("click", () => openInspectionDetail(inspId));
@@ -2419,32 +2453,13 @@
       `;
     }
 
-    // 방문 날짜가 이틀 이상 연속되면(예: 8/1~8/3 사흘 연속 방문) 그 회차들을 테두리 하나로
-    // 묶고, 위에 "시작일 ~ 종료일 (N일간)" 요약을 붙인다(사용자 요청) - 연속 여부는 회차
-    // 날짜(캘린더 일자)가 정확히 하루 차이인지로만 판단한다(요일과 무관).
-    function groupConsecutiveRounds(sortedDescRounds) {
-      const groups = [];
-      let current = [];
-      sortedDescRounds.forEach((r) => {
-        const prev = current[current.length - 1];
-        const prevDate = prev && prev.date ? new Date(prev.date + "T00:00:00") : null;
-        const curDate = r.date ? new Date(r.date + "T00:00:00") : null;
-        const isConsecutive = prevDate && curDate && !isNaN(prevDate) && !isNaN(curDate)
-          && (prevDate - curDate) === 86400000;
-        if (!isConsecutive && current.length > 0) { groups.push(current); current = []; }
-        current.push(r);
-      });
-      if (current.length > 0) groups.push(current);
-      return groups;
-    }
-
-    list.innerHTML = groupConsecutiveRounds(rounds).map((group) => {
+    list.innerHTML = groupConsecutiveByDate(rounds, (r) => r.date).map((group) => {
       if (group.length < 2) return roundCardHtml(group[0]);
       const endDate = group[0].date;
       const startDate = group[group.length - 1].date;
       return `
-        <div class="round-group">
-          <div class="round-group-header">${escapeHtml(startDate)} ~ ${escapeHtml(endDate)} (${group.length}일간)</div>
+        <div class="date-group">
+          <div class="date-group-header">${escapeHtml(startDate)} ~ ${escapeHtml(endDate)} (${group.length}일간)</div>
           ${group.map(roundCardHtml).join("")}
         </div>
       `;
