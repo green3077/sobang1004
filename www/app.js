@@ -1975,8 +1975,9 @@
     const completedDate = todayISO();
     await FireDB.updateInspection(galleryActiveInspectionId, { status: "completed", completedDate });
     if (insp) {
-      // 지적사항 회차 날짜는 예정일(scheduledDate)이 아니라 실제 완료 처리한 날짜를 쓴다(사용자 요청) -
-      // 회차 목록의 "완료" 배지도 이 날짜로 완료된 점검을 찾아 매칭한다(renderDeficiencyRounds 참고).
+      // 예정일(scheduledDate)이 아니라 실제로 "점검 완료 처리"를 누른 날짜(completedDate)로
+      // 회차를 만든다 - 예정일과 다른 날 완료 처리했을 때 지적사항 메뉴의 회차 날짜가 실제
+      // 방문일과 어긋나던 문제 수정(사용자 요청).
       await ensureDeficiencyRoundForDate(insp.siteId, completedDate);
       await ensureConstructionJobForDate(insp.siteId, completedDate);
     }
@@ -2366,14 +2367,16 @@
 
     // 날짜(요일)와 그 날짜의 점검 완료 여부만 보여준다(사용자 요청) - 지적사항 미해결/해결
     // 개수 등은 회차 상세(openRoundDeficiencies)에 들어가면 보이므로 목록에서는 뺀다. 완료
-    // 여부는 지적사항이 아니라 그 날짜의 점검 회차(inspections, completedDate 일치) 상태를
-    // 그대로 따른다 - "점검 완료 처리"를 눌러야 반영되는 그 상태와 같은 값. 회차 자체도 완료
-    // 처리 시점에 completedDate로 자동 생성되므로(ensureDeficiencyRoundForDate 호출부 참고)
-    // completedDate로 매칭해야 그 회차가 곧바로 "완료"로 보인다.
+    // 여부는 지적사항이 아니라 그 날짜의 점검(inspections) 상태를 그대로 따른다 - "점검 완료
+    // 처리"를 눌러야 반영되는 그 상태와 같은 값(status === "completed"). 회차는 이제
+    // completedDate로 생성되지만(예정일과 다른 날 완료 처리한 경우를 위해), 예정일에 맞춰
+    // 만들어진 옛 회차도 여전히 있을 수 있어 scheduledDate/completedDate 둘 다로 매칭한다.
     const siteInspections = await FireDB.getInspectionsBySite(currentDeficiencySiteId);
     const inspByDate = new Map();
     siteInspections.forEach((insp) => {
-      if (insp.status === "completed" && insp.completedDate) inspByDate.set(insp.completedDate, insp);
+      if (insp.status !== "completed") return;
+      if (insp.scheduledDate) inspByDate.set(insp.scheduledDate, insp);
+      if (insp.completedDate) inspByDate.set(insp.completedDate, insp);
     });
     list.innerHTML = rounds.map((r) => {
       const d = r.date ? new Date(r.date + "T00:00:00") : null;
@@ -2472,7 +2475,9 @@
 
     const list = $("#deficienciesList");
     if (currentDeficiencies.length === 0) {
-      list.innerHTML = `<div class="empty-state">등록된 지적사항이 없습니다.<br>직접 추가하거나 자료를 올려보세요.</div>`;
+      list.innerHTML = `<div class="empty-state">${round && round.noDeficiency
+        ? "지적내역 없음으로 표시된 회차입니다."
+        : "등록된 지적사항이 없습니다.<br>직접 추가하거나 자료를 올려보세요."}</div>`;
       return;
     }
 
@@ -2501,7 +2506,7 @@
       `;
     }
 
-    function defCardHtml(def, idx) {
+    function deficiencyCardHtml(def, idx) {
       return `
       <div class="deficiency-card" data-def="${def.id}">
         <div class="deficiency-card-number">${idx + 1}번 지적항목</div>
@@ -2529,20 +2534,19 @@
     `;
     }
 
-    // 지적사항 관리 화면의 카드 목록을 미해결/해결로 나눠서 보여준다(사용자 요청) - 번호는 전체
-    // 목록 기준 순번을 그대로 유지해, 그룹이 바뀌어도(체크박스 토글) 지적내역서 등 다른 화면의
-    // 번호와 어긋나지 않게 한다.
-    const openDefs = [];
-    const resolvedDefs = [];
+    // 미완료/완료로 나눠서 보여준다(사용자 요청) - 번호는 전체 등록 순서(idx) 그대로 유지해,
+    // 이행완료 체크로 그룹이 바뀌어도 항목 번호가 바뀌지 않게 한다.
+    function groupSectionHtml(title, items) {
+      if (items.length === 0) return "";
+      return `<div class="deficiency-group-header">${title} (${items.length}건)</div>`
+        + items.map(({ def, idx }) => deficiencyCardHtml(def, idx)).join("");
+    }
+    const unresolvedItems = [];
+    const resolvedItems = [];
     currentDeficiencies.forEach((def, idx) => {
-      (def.resolved ? resolvedDefs : openDefs).push([def, idx]);
+      (def.resolved ? resolvedItems : unresolvedItems).push({ def, idx });
     });
-    list.innerHTML = `
-      <div class="deficiency-group-header">미해결 (${openDefs.length})</div>
-      ${openDefs.length ? openDefs.map(([def, idx]) => defCardHtml(def, idx)).join("") : `<div class="empty-state">미해결 지적사항이 없습니다.</div>`}
-      <div class="deficiency-group-header">해결 (${resolvedDefs.length})</div>
-      ${resolvedDefs.length ? resolvedDefs.map(([def, idx]) => defCardHtml(def, idx)).join("") : `<div class="empty-state">해결된 지적사항이 없습니다.</div>`}
-    `;
+    list.innerHTML = groupSectionHtml("미완료", unresolvedItems) + groupSectionHtml("완료", resolvedItems);
 
     $$("#deficienciesList .def-field").forEach((el) => {
       el.addEventListener("change", async () => {
@@ -2694,6 +2698,7 @@
     if (!ok) return;
     await FireDB.updateRound(currentRoundId, { noDeficiency: true });
     toast("지적사항 없음으로 표시했습니다.");
+    await renderDeficiencies();
   });
 
   $("#btnDeleteAllSiteDeficiencies").addEventListener("click", async () => {

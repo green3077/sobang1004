@@ -851,6 +851,15 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .deficiency-group-header { font-size: 15px; font-weight: 800; color: var(--text-dim); margin: 18px 2px 10px; }
 .deficiency-group-header:first-child { margin-top: 2px; }
 .deficiency-card-number { font-size: 15px; font-weight: 800; color: var(--accent-dark); margin-bottom: 8px; }
+.deficiency-group-header {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--text-dim);
+  border-bottom: 2px solid var(--border);
+  padding-bottom: 6px;
+  margin: 18px 0 12px;
+}
+.deficiency-group-header:first-child { margin-top: 0; }
 .deficiency-card .field-row { margin-bottom: 0; }
 .deficiency-card .field { margin-bottom: 12px; }
 .deficiency-photo-cols { display: flex; gap: 12px; margin-top: 6px; }
