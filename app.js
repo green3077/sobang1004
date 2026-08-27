@@ -511,6 +511,10 @@
     const inspectionItemsBySite = new Map();
     relevant.forEach((insp) => {
       const site = siteMap.get(insp.siteId);
+      // 종합/작동점검 대상월이 아닌 통상적인 방문(월점검)은 "오늘의 주요 할일"에서 뺀다
+      // (사용자 요청) - 이 목록은 법정으로 실제 due한 종합/작동점검만 눈에 띄게 보여주기 위함.
+      const typeLabel = insp.type || (site ? inspectionTypeForMonth(site, insp.scheduledDate) : "");
+      if (typeLabel === "월점검") return;
       const done = insp.status === "completed";
       const isOverdue = !done && insp.scheduledDate < today;
       const last = site ? lastBySite.get(site.id) : null;
@@ -546,6 +550,9 @@
     const inspectionItems = Array.from(inspectionItemsBySite.values());
     const scheduleItems = confirmedSiteIds.map((id) => {
       const site = siteMap.get(id);
+      // 여기도 마찬가지로 종합/작동점검 대상월이 아니면(월점검) "오늘의 주요 할일"에서 뺀다.
+      const typeLabel = inspectionTypeForMonth(site, today);
+      if (typeLabel === "월점검") return null;
       const last = lastBySite.get(id);
       const lastDate = last ? (last.completedDate || last.scheduledDate) : "";
       const html = `
@@ -553,7 +560,7 @@
           <span class="home-todo-item-icon">📅</span>
           <div class="home-todo-item-body">
             <div class="home-todo-item-title">${escapeHtml(site.name)}</div>
-            <div class="home-todo-item-sub">${escapeHtml(inspectionTypeForMonth(site, today))} · 오늘 방문 확정</div>
+            <div class="home-todo-item-sub">${escapeHtml(typeLabel)} · 오늘 방문 확정</div>
             <div class="home-todo-item-sub">마지막 점검일: ${lastDate ? escapeHtml(lastDate) : "이력 없음"}</div>
             ${site.equipmentMemo ? `<div class="home-todo-item-memo">📝 ${escapeHtml(site.equipmentMemo)}</div>` : ""}
             ${site.contactName || site.contactPhone ? `
@@ -566,12 +573,18 @@
         </div>
       `;
       return { siteId: id, html };
-    });
+    }).filter(Boolean);
     // 스케줄 관리(오늘 날짜)에서 정한 방문 순서 그대로 표시(사용자 요청) - 그 순서에 없는 항목
     // (예: 여러 날짜 전부터 밀려온 기한초과 점검)은 순서 정보가 없으므로 뒤로 보내되, 그런
     // 항목끼리는 원래 순서(기한초과 날짜순)를 그대로 유지한다.
     const scheduleOrder = new Map((todaySchedule ? todaySchedule.siteIds : []).map((id, idx) => [id, idx]));
     const items = [...inspectionItems, ...scheduleItems];
+    // 월점검이라 다 걸러지면(위 필터 참고) 여기서 빈 목록이 될 수 있다 - 그 경우도 빈 상태
+    // 문구를 보여준다(월점검만 있던 날 목록이 텅 비어 보이는 게 아니라 "없습니다"로 안내).
+    if (items.length === 0) {
+      list.innerHTML = `<div class="home-todo-empty">오늘 예정된 할일이 없습니다.</div>`;
+      return;
+    }
     items.sort((a, b) => {
       const ra = scheduleOrder.has(a.siteId) ? scheduleOrder.get(a.siteId) : Infinity;
       const rb = scheduleOrder.has(b.siteId) ? scheduleOrder.get(b.siteId) : Infinity;
