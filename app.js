@@ -2368,20 +2368,20 @@
     // 날짜(요일)와 그 날짜의 점검 완료 여부만 보여준다(사용자 요청) - 지적사항 미해결/해결
     // 개수 등은 회차 상세(openRoundDeficiencies)에 들어가면 보이므로 목록에서는 뺀다. 완료
     // 여부는 지적사항이 아니라 그 날짜의 점검(inspections) 상태를 그대로 따른다 - "점검 완료
-    // 처리"를 눌러야 반영되는 그 상태와 같은 값. 회차는 이제 completedDate로 생성되지만
-    // (예정일과 다른 날 완료 처리한 경우를 위해), 예정일에 맞춰 만들어진 옛 회차도 여전히
-    // 있을 수 있어 scheduledDate/completedDate 둘 다로 매칭한다.
+    // 처리"를 눌러야 반영되는 그 상태와 같은 값(status === "completed"). 회차는 이제
+    // completedDate로 생성되지만(예정일과 다른 날 완료 처리한 경우를 위해), 예정일에 맞춰
+    // 만들어진 옛 회차도 여전히 있을 수 있어 scheduledDate/completedDate 둘 다로 매칭한다.
     const siteInspections = await FireDB.getInspectionsBySite(currentDeficiencySiteId);
     const inspByDate = new Map();
     siteInspections.forEach((insp) => {
+      if (insp.status !== "completed") return;
       if (insp.scheduledDate) inspByDate.set(insp.scheduledDate, insp);
       if (insp.completedDate) inspByDate.set(insp.completedDate, insp);
     });
     list.innerHTML = rounds.map((r) => {
       const d = r.date ? new Date(r.date + "T00:00:00") : null;
       const dateLabel = d && !isNaN(d) ? `${r.date} (${WEEKDAY_LABEL[d.getDay()]})` : (r.date || "");
-      const insp = inspByDate.get(r.date);
-      const done = !!(insp && insp.status === "completed");
+      const done = inspByDate.has(r.date);
       return `
         <div class="list-card" data-round="${r.id}">
           <div class="list-card-title">
@@ -3365,8 +3365,8 @@
   // 확인 필요), 새 버전이 있으면 외부 브라우저로 APK 다운로드 URL을 열어 다운로드->설치를 대신 시작해준다.
   // version.js의 APP_VERSION은 마지막으로 웹 파일이 바뀐 실제 날짜/시간(한국시간)이고,
   // APP_VERSION_CODE/NAME은 APK를 새로 빌드해서 배포할 때만 올리는 별개의 버전 번호다.
-  const APP_VERSION_CODE = 45;
-  const APP_VERSION_NAME = "1.44";
+  const APP_VERSION_CODE = 46;
+  const APP_VERSION_NAME = "1.45";
   const UPDATE_MANIFEST_URL = "https://green3077.github.io/sobang1004/version.json";
   const IS_NATIVE_UPDATE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
   // 이 프로젝트는 번들러(webpack/vite 등)를 쓰지 않는 순수 스크립트 앱이라 @capacitor/core 전체가

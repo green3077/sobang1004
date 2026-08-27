@@ -1,5 +1,16 @@
 apply plugin: 'com.android.application'
 
+// release 서명 키는 git에 올리지 않는다(android/.gitignore 참고) - 대신 개발자 각자 PC의
+// android/keystore.properties(로컬 전용)에서 경로/비밀번호를 읽는다. 두 PC(본인 + green님)가
+// 같은 keystore.properties를 갖고 있어야 어느 쪽에서 빌드해도 기존 설치본을 그대로 덮어쓸 수
+// 있다 - 없으면 release 빌드가 명확히 실패하게 해서, 실수로 서명 없는/다른 서명의 APK가
+// 조용히 배포되는 사고를 막는다.
+def keystorePropsFile = rootProject.file('keystore.properties')
+def keystoreProps = new Properties()
+if (keystorePropsFile.exists()) {
+    keystoreProps.load(new FileInputStream(keystorePropsFile))
+}
+
 android {
     namespace = "com.joeunfire.inspection"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -16,10 +27,23 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (keystorePropsFile.exists()) {
+                storeFile rootProject.file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (keystorePropsFile.exists()) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }

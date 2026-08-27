@@ -1,6 +1,6 @@
 {
-  "versionCode": 45,
-  "versionName": "1.44",
+  "versionCode": 46,
+  "versionName": "1.45",
   "apkUrl": "https://green3077.github.io/sobang1004/fire-inspection.apk",
-  "notes": "점검팀/공사팀 기록 분리(점검완료 시 공사팀에 자동 등록) + 지적사항 최신순/이번달/다음달/지난달 정렬 + hwpx 사진 크기 버그 수정(구버전 한글 대응)"
+  "notes": "점검 완료 처리 시 지적사항 회차 날짜를 완료 처리한 날짜(예정일 아님)로 자동 생성 + 지적사항 관리 화면을 미해결/해결로 나눠서 표시. 이번 버전은 서명 키가 이전과 달라 기존 앱을 삭제하고 새로 설치해야 합니다."
 }

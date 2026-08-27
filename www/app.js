@@ -1972,10 +1972,13 @@
     const ok = await confirmDialog("오늘 점검을 완료 처리할까요? (마지막 점검일이 갱신됩니다)");
     if (!ok || !galleryActiveInspectionId) return;
     const insp = await FireDB.getInspection(galleryActiveInspectionId);
-    await FireDB.updateInspection(galleryActiveInspectionId, { status: "completed", completedDate: todayISO() });
+    const completedDate = todayISO();
+    await FireDB.updateInspection(galleryActiveInspectionId, { status: "completed", completedDate });
     if (insp) {
-      await ensureDeficiencyRoundForDate(insp.siteId, insp.scheduledDate);
-      await ensureConstructionJobForDate(insp.siteId, todayISO());
+      // 지적사항 회차 날짜는 예정일(scheduledDate)이 아니라 실제 완료 처리한 날짜를 쓴다(사용자 요청) -
+      // 회차 목록의 "완료" 배지도 이 날짜로 완료된 점검을 찾아 매칭한다(renderDeficiencyRounds 참고).
+      await ensureDeficiencyRoundForDate(insp.siteId, completedDate);
+      await ensureConstructionJobForDate(insp.siteId, completedDate);
     }
     toast("점검이 완료 처리되었습니다.", "success");
     await openInspectionDetail(galleryActiveInspectionId);
@@ -2363,15 +2366,19 @@
 
     // 날짜(요일)와 그 날짜의 점검 완료 여부만 보여준다(사용자 요청) - 지적사항 미해결/해결
     // 개수 등은 회차 상세(openRoundDeficiencies)에 들어가면 보이므로 목록에서는 뺀다. 완료
-    // 여부는 지적사항이 아니라 그 날짜의 점검 회차(inspections, scheduledDate 일치) 상태를
-    // 그대로 따른다 - "점검 완료 처리"를 눌러야 반영되는 그 상태와 같은 값.
+    // 여부는 지적사항이 아니라 그 날짜의 점검 회차(inspections, completedDate 일치) 상태를
+    // 그대로 따른다 - "점검 완료 처리"를 눌러야 반영되는 그 상태와 같은 값. 회차 자체도 완료
+    // 처리 시점에 completedDate로 자동 생성되므로(ensureDeficiencyRoundForDate 호출부 참고)
+    // completedDate로 매칭해야 그 회차가 곧바로 "완료"로 보인다.
     const siteInspections = await FireDB.getInspectionsBySite(currentDeficiencySiteId);
-    const inspByDate = new Map(siteInspections.map((insp) => [insp.scheduledDate, insp]));
+    const inspByDate = new Map();
+    siteInspections.forEach((insp) => {
+      if (insp.status === "completed" && insp.completedDate) inspByDate.set(insp.completedDate, insp);
+    });
     list.innerHTML = rounds.map((r) => {
       const d = r.date ? new Date(r.date + "T00:00:00") : null;
       const dateLabel = d && !isNaN(d) ? `${r.date} (${WEEKDAY_LABEL[d.getDay()]})` : (r.date || "");
-      const insp = inspByDate.get(r.date);
-      const done = !!(insp && insp.status === "completed");
+      const done = inspByDate.has(r.date);
       return `
         <div class="list-card" data-round="${r.id}">
           <div class="list-card-title">
@@ -2494,7 +2501,8 @@
       `;
     }
 
-    list.innerHTML = currentDeficiencies.map((def, idx) => `
+    function defCardHtml(def, idx) {
+      return `
       <div class="deficiency-card" data-def="${def.id}">
         <div class="deficiency-card-number">${idx + 1}번 지적항목</div>
         <div class="field-row">
@@ -2518,7 +2526,23 @@
           <button class="btn btn-danger btn-delete-def" data-def="${def.id}">삭제</button>
         </div>
       </div>
-    `).join("");
+    `;
+    }
+
+    // 지적사항 관리 화면의 카드 목록을 미해결/해결로 나눠서 보여준다(사용자 요청) - 번호는 전체
+    // 목록 기준 순번을 그대로 유지해, 그룹이 바뀌어도(체크박스 토글) 지적내역서 등 다른 화면의
+    // 번호와 어긋나지 않게 한다.
+    const openDefs = [];
+    const resolvedDefs = [];
+    currentDeficiencies.forEach((def, idx) => {
+      (def.resolved ? resolvedDefs : openDefs).push([def, idx]);
+    });
+    list.innerHTML = `
+      <div class="deficiency-group-header">미해결 (${openDefs.length})</div>
+      ${openDefs.length ? openDefs.map(([def, idx]) => defCardHtml(def, idx)).join("") : `<div class="empty-state">미해결 지적사항이 없습니다.</div>`}
+      <div class="deficiency-group-header">해결 (${resolvedDefs.length})</div>
+      ${resolvedDefs.length ? resolvedDefs.map(([def, idx]) => defCardHtml(def, idx)).join("") : `<div class="empty-state">해결된 지적사항이 없습니다.</div>`}
+    `;
 
     $$("#deficienciesList .def-field").forEach((el) => {
       el.addEventListener("change", async () => {
@@ -3329,54 +3353,15 @@
     $("#changeHistoryEnabledToggle").checked = isChangeHistoryVisible();
     renderDriveStatus();
     $("#authCurrentUser").textContent = Auth.getDisplayName();
-    renderCommandLog();
   }
-
-  // ---------- 명령어 기록 (Claude Code로 이 앱을 수정할 때 입력한 명령을 시간순으로 기록) ----------
-  // 앱 코드가 자동으로 수집하는 게 아니라(이 화면과 지금 개발 세션 사이엔 연결이 없음), Claude Code가
-  // 작업할 때마다 command-log.json에 항목을 직접 추가하고 배포하는 방식이다. version.json/update
-  // 체크와 같은 패턴으로 GitHub Pages의 절대 URL에서 항상 최신 내용을 불러온다.
-  const COMMAND_LOG_URL = "https://green3077.github.io/sobang1004/command-log.json";
-
-  function formatCommandLogTime(iso) {
-    const d = new Date(iso);
-    if (isNaN(d)) return iso;
-    const pad = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  }
-
-  async function renderCommandLog() {
-    const listEl = $("#commandLogList");
-    if (!listEl) return;
-    listEl.textContent = "불러오는 중...";
-    try {
-      const res = await fetch(COMMAND_LOG_URL + "?t=" + Date.now());
-      if (!res.ok) throw new Error("fetch_failed_" + res.status);
-      const entries = await res.json();
-      if (!Array.isArray(entries) || entries.length === 0) {
-        listEl.textContent = "기록된 명령이 없습니다.";
-        return;
-      }
-      const sorted = [...entries].sort((a, b) => new Date(b.at) - new Date(a.at));
-      listEl.innerHTML = sorted.map((e) => `
-        <div class="command-log-item">
-          <div class="command-log-time">${escapeHtml(formatCommandLogTime(e.at))}</div>
-          <div class="command-log-text">${escapeHtml(e.text || "")}</div>
-        </div>
-      `).join("");
-    } catch (err) {
-      listEl.textContent = "명령어 기록을 불러오지 못했습니다.";
-    }
-  }
-  $("#btnRefreshCommandLog").addEventListener("click", renderCommandLog);
 
   // ---------- 앱 버전 / 업데이트 확인 ----------
   // 사이드로드 앱(스토어 밖에서 apk로 설치)은 스스로를 조용히 덮어쓸 수 없으므로(설치는 항상 사용자
   // 확인 필요), 새 버전이 있으면 외부 브라우저로 APK 다운로드 URL을 열어 다운로드->설치를 대신 시작해준다.
   // version.js의 APP_VERSION은 마지막으로 웹 파일이 바뀐 실제 날짜/시간(한국시간)이고,
   // APP_VERSION_CODE/NAME은 APK를 새로 빌드해서 배포할 때만 올리는 별개의 버전 번호다.
-  const APP_VERSION_CODE = 45;
-  const APP_VERSION_NAME = "1.44";
+  const APP_VERSION_CODE = 46;
+  const APP_VERSION_NAME = "1.45";
   const UPDATE_MANIFEST_URL = "https://green3077.github.io/sobang1004/version.json";
   const IS_NATIVE_UPDATE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
   // 이 프로젝트는 번들러(webpack/vite 등)를 쓰지 않는 순수 스크립트 앱이라 @capacitor/core 전체가
