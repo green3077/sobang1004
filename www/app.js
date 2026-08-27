@@ -2393,7 +2393,7 @@
       if (insp.scheduledDate) completedInspectionDates.add(insp.scheduledDate);
       if (insp.completedDate) completedInspectionDates.add(insp.completedDate);
     });
-    list.innerHTML = rounds.map((r) => {
+    function roundCardHtml(r) {
       const d = r.date ? new Date(r.date + "T00:00:00") : null;
       const dateLabel = d && !isNaN(d) ? `${r.date} (${WEEKDAY_LABEL[d.getDay()]})` : (r.date || "");
       const roundDefs = defsByRound.get(r.id) || [];
@@ -2415,6 +2415,37 @@
             <button type="button" data-menu-edit-date>날짜 수정</button>
             <button type="button" class="danger" data-menu-delete>삭제</button>
           </div>
+        </div>
+      `;
+    }
+
+    // 방문 날짜가 이틀 이상 연속되면(예: 8/1~8/3 사흘 연속 방문) 그 회차들을 테두리 하나로
+    // 묶고, 위에 "시작일 ~ 종료일 (N일간)" 요약을 붙인다(사용자 요청) - 연속 여부는 회차
+    // 날짜(캘린더 일자)가 정확히 하루 차이인지로만 판단한다(요일과 무관).
+    function groupConsecutiveRounds(sortedDescRounds) {
+      const groups = [];
+      let current = [];
+      sortedDescRounds.forEach((r) => {
+        const prev = current[current.length - 1];
+        const prevDate = prev && prev.date ? new Date(prev.date + "T00:00:00") : null;
+        const curDate = r.date ? new Date(r.date + "T00:00:00") : null;
+        const isConsecutive = prevDate && curDate && !isNaN(prevDate) && !isNaN(curDate)
+          && (prevDate - curDate) === 86400000;
+        if (!isConsecutive && current.length > 0) { groups.push(current); current = []; }
+        current.push(r);
+      });
+      if (current.length > 0) groups.push(current);
+      return groups;
+    }
+
+    list.innerHTML = groupConsecutiveRounds(rounds).map((group) => {
+      if (group.length < 2) return roundCardHtml(group[0]);
+      const endDate = group[0].date;
+      const startDate = group[group.length - 1].date;
+      return `
+        <div class="round-group">
+          <div class="round-group-header">${escapeHtml(startDate)} ~ ${escapeHtml(endDate)} (${group.length}일간)</div>
+          ${group.map(roundCardHtml).join("")}
         </div>
       `;
     }).join("");
