@@ -503,7 +503,12 @@
       list.innerHTML = `<div class="home-todo-empty">오늘 예정된 할일이 없습니다.</div>`;
       return;
     }
-    const inspectionItems = relevant.map((insp) => {
+    // 같은 거래처가 오늘 할일에 여러 번 뜨지 않게 한다(사용자 요청) - 예를 들어 예전에 밀린
+    // 기한초과 건과 오늘 새로 잡힌 건이 같은 거래처에 둘 다 있으면 하나로 합친다. 완료 처리된
+    // 게 있으면 그걸 대표로 보여주고(방금 처리한 결과가 눈에 보여야 하므로), 없으면 먼저
+    // 나온(=scheduledDate가 가장 이른, 가장 급한) 건을 그대로 둔다.
+    const inspectionItemsBySite = new Map();
+    relevant.forEach((insp) => {
       const site = siteMap.get(insp.siteId);
       const done = insp.status === "completed";
       const isOverdue = !done && insp.scheduledDate < today;
@@ -532,8 +537,12 @@
           </div>
         </div>
       `;
-      return { siteId: insp.siteId, html };
+      const existing = inspectionItemsBySite.get(insp.siteId);
+      if (!existing || (done && !existing.done)) {
+        inspectionItemsBySite.set(insp.siteId, { siteId: insp.siteId, html, done });
+      }
     });
+    const inspectionItems = Array.from(inspectionItemsBySite.values());
     const scheduleItems = confirmedSiteIds.map((id) => {
       const site = siteMap.get(id);
       const last = lastBySite.get(id);
