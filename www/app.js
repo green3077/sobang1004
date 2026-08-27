@@ -2012,18 +2012,18 @@
   });
 
   $("#btnCompleteSiteVisit").addEventListener("click", async () => {
-    const ok = await confirmDialog("오늘 점검을 완료 처리할까요? (마지막 점검일이 갱신됩니다)");
-    if (!ok || !galleryActiveInspectionId) return;
+    if (!galleryActiveInspectionId) return;
     const insp = await FireDB.getInspection(galleryActiveInspectionId);
-    const completedDate = todayISO();
+    if (!insp) return;
+    // 완료 날짜는 "점검하기" 버튼 위에서 고른 날짜(scheduledDate)를 그대로 쓴다(사용자 요청) -
+    // "점검 완료 처리"를 누르는 시점의 오늘 날짜를 쓰면, 방문은 그 날짜에 했지만 깜빡하고
+    // 당일에 못 누르고 며칠 뒤에야 누르는 경우 완료일이 실제 방문일과 어긋나게 된다.
+    const completedDate = insp.scheduledDate || todayISO();
+    const ok = await confirmDialog(`${completedDate} 점검을 완료 처리할까요? (마지막 점검일이 갱신됩니다)`);
+    if (!ok) return;
     await FireDB.updateInspection(galleryActiveInspectionId, { status: "completed", completedDate });
-    if (insp) {
-      // 예정일(scheduledDate)이 아니라 실제로 "점검 완료 처리"를 누른 날짜(completedDate)로
-      // 회차를 만든다 - 예정일과 다른 날 완료 처리했을 때 지적사항 메뉴의 회차 날짜가 실제
-      // 방문일과 어긋나던 문제 수정(사용자 요청).
-      await ensureDeficiencyRoundForDate(insp.siteId, completedDate);
-      await ensureConstructionJobForDate(insp.siteId, completedDate);
-    }
+    await ensureDeficiencyRoundForDate(insp.siteId, completedDate);
+    await ensureConstructionJobForDate(insp.siteId, completedDate);
     toast("점검이 완료 처리되었습니다.", "success");
     await openInspectionDetail(galleryActiveInspectionId);
   });
