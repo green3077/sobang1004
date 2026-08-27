@@ -202,6 +202,10 @@ const FireDB = (() => {
       for (const p of sitePhotos) {
         await remove(STORES.photos, p.id);
       }
+      const jobs = (await fbGetAll("constructionJobs")).filter((j) => j.siteId === id);
+      for (const job of jobs) {
+        await fbRemove(`constructionJobs/${job.id}`);
+      }
       return fbRemove(`sites/${id}`);
     },
     getSite: (id) => fbGet(`sites/${id}`),
@@ -330,6 +334,27 @@ const FireDB = (() => {
       if (!existing) return null;
       return fbSet(`schedules/${date}`, { ...existing, confirmed });
     },
+
+    // Construction Jobs (공사팀 기록 - 점검팀 기록(inspections/deficiencies)과 완전히 분리해서
+    // 따로 관리한다, 사용자 요청). 점검팀이 "점검 완료 처리"를 누르면 그 날짜만 여기 자동으로
+    // 하나 만들어지고, 그 뒤 내용(메모)은 공사팀이 각자 채운다. 공사팀이 직접 새 항목을 추가할
+    // 수도 있다 - 두 팀 다 같은 거래처(sites)를 참조하지만 방문/작업 이력은 서로 건드리지 않는다.
+    async addConstructionJob(job) {
+      const id = job.id || genId();
+      return fbSet(`constructionJobs/${id}`, { ...job, id });
+    },
+    async updateConstructionJob(id, changes) {
+      const existing = await fbGet(`constructionJobs/${id}`);
+      if (!existing) throw new Error("Construction job not found: " + id);
+      return fbSet(`constructionJobs/${id}`, { ...existing, ...changes, id });
+    },
+    async deleteConstructionJob(id) {
+      return fbRemove(`constructionJobs/${id}`);
+    },
+    getConstructionJob: (id) => fbGet(`constructionJobs/${id}`),
+    getConstructionJobsBySite: async (siteId) =>
+      (await fbGetAll("constructionJobs")).filter((j) => j.siteId === siteId),
+    getAllConstructionJobs: () => fbGetAll("constructionJobs"),
 
     // 업체 정보(회사명/주소/전화/대표이사/사업자등록번호/면허번호) - 팀 전체가 같은 값을 보도록
     // 공유 저장소에 둔다(기존엔 기기별 localStorage라 한 사람이 고쳐도 다른 사람 화면엔 안 보였음).

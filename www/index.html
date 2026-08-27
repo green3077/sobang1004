@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>소방점검 관리</title>
 <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-<link rel="stylesheet" href="style.css?v=20260825-0938">
+<link rel="stylesheet" href="style.css?v=20260827-1253">
 </head>
 <body>
 <!-- 스크립트 실행 도중 어디선가 예외가 나면 그 뒤의 코드(버튼 연결 등)가 통째로 실행되지
@@ -187,13 +187,26 @@
     <button class="btn btn-secondary" id="btnBackFromConstructionEstimates">← 뒤로</button>
   </section>
 
-  <!-- 공사팀: 공사내역 (준비중) -->
+  <!-- 공사팀: 공사내역 (날짜별 이력 - 점검팀 기록과 별도로 관리) -->
   <section id="screen-construction-history" class="screen">
     <div class="card">
       <h2>🛠️ <span id="constructionHistoryCompanyName"></span> · 공사내역</h2>
-      <div class="empty-state">준비중입니다.<br>곧 만나요!</div>
+      <div class="hint-text">점검팀이 점검을 완료 처리하면 그 날짜가 자동으로 추가됩니다. 직접 등록할 수도 있습니다.</div>
     </div>
+    <button class="btn btn-primary btn-large" id="btnAddConstructionJob">+ 등록</button>
+    <div id="constructionHistoryList"></div>
     <button class="btn btn-secondary" id="btnBackFromConstructionHistory">← 뒤로</button>
+  </section>
+
+  <!-- 공사팀: 공사내역 상세 (날짜 하나) -->
+  <section id="screen-construction-job-detail" class="screen">
+    <div class="card">
+      <h2 id="constructionJobDateLabel"></h2>
+      <div class="field"><span>메모</span><textarea id="constructionJobMemo" rows="6" placeholder="공사 내용을 적어주세요"></textarea></div>
+      <button class="btn btn-primary" id="btnSaveConstructionJob">저장</button>
+      <button class="btn btn-danger" id="btnDeleteConstructionJob">삭제</button>
+    </div>
+    <button class="btn btn-secondary" id="btnBackFromConstructionJobDetail">← 목록으로</button>
   </section>
 
   <!-- 거래처 관리 (등록 방법 선택 + 기존 거래처 목록) -->
@@ -342,6 +355,12 @@
     <div class="sort-toolbar">
       <button class="sort-btn active" id="btnDefSortByName">가나다순</button>
       <button class="sort-btn" id="btnDefSortByRegion">지역별</button>
+      <button class="sort-btn" id="btnDefSortByRecent">최신순</button>
+    </div>
+    <div class="sort-toolbar">
+      <button class="sort-btn" id="btnDefFilterThisMonth">이번달</button>
+      <button class="sort-btn" id="btnDefFilterNextMonth">다음달</button>
+      <button class="sort-btn" id="btnDefFilterLastMonth">지난달</button>
     </div>
     <div class="filter-toolbar" id="defFilterToolbar">
       <button type="button" class="filter-chip" data-filter="pending">검토중</button>
@@ -556,15 +575,15 @@
      사진이 이상하게 나온다"는, 이미 고쳐서 배포한 버그를 PC에서만 계속 겪은 원인이었다) - 배포마다
      이 값을 version.js의 APP_VERSION과 함께 갱신해야 한다. -->
 <script src="firebase-config.js"></script>
-<script src="version.js?v=20260825-0938"></script>
-<script src="auth.js?v=20260825-0938"></script>
-<script src="db.js?v=20260825-0938"></script>
-<script src="ui.js?v=20260825-0938"></script>
-<script src="import.js?v=20260825-0938"></script>
-<script src="client-import.js?v=20260825-0938"></script>
-<script src="bldreg.js?v=20260825-0938"></script><script src="ai-fill.js?v=20260825-0938"></script>
-<script src="hwpx-export.js?v=20260825-0938"></script>
-<script src="drive.js?v=20260825-0938"></script>
-<script src="app.js?v=20260825-0938"></script>
+<script src="version.js?v=20260827-1253"></script>
+<script src="auth.js?v=20260827-1253"></script>
+<script src="db.js?v=20260827-1253"></script>
+<script src="ui.js?v=20260827-1253"></script>
+<script src="import.js?v=20260827-1253"></script>
+<script src="client-import.js?v=20260827-1253"></script>
+<script src="bldreg.js?v=20260827-1253"></script><script src="ai-fill.js?v=20260827-1253"></script>
+<script src="hwpx-export.js?v=20260827-1253"></script>
+<script src="drive.js?v=20260827-1253"></script>
+<script src="app.js?v=20260827-1253"></script>
 </body>
 </html>

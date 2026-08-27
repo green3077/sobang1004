@@ -12,9 +12,13 @@
   // "이번달" 필터 - 정렬 방식과 별개로 켜고 끌 수 있는 토글. "거래처 관리"(등록 화면 아래 목록)와
   // "점검팀"(거래처 목록) 두 화면이 이 상태를 공유한다 - 같은 거래처 목록을 보여주는 화면이라서.
   let sitesMonthOnly = false;
-  let defSortMode = "name";      // 지적사항 허브(업체별) 정렬 방식, 거래처 목록과 동일한 개념
+  let defSortMode = "name";      // 지적사항 허브(업체별) 정렬 방식: "name"(가나다순) | "region"(지역별) | "recent"(최신순 - 점검완료일 기준)
   let defSelectedRegion = null;
   let defFilters = new Set();    // 지적사항 허브 상태 필터: "pending"|"none"|"open"|"resolved" 중 선택된 것들 (OR 조건)
+  // "이번달"/"다음달"/"지난달" 버튼 - 종합/작동점검월이 그 달에 해당하는 거래처만 보여준다(사용자
+  // 요청). 셋 중 하나만 켤 수 있고(null이면 전체), 켜는 순간 그에 맞는 정렬로 강제 전환한다
+  // (이번달→최신순, 다음달/지난달→가나다순) - 지역별 정렬과는 동시에 쓰지 않는다.
+  let defMonthFilter = null;     // null | "this" | "next" | "last"
   let comprehensiveTarget = null; // 현장 등록/수정 폼의 "종합점검대상/해당없음" 토글 상태: true | false | null(미정)
   // 종합점검/작동점검월을 예외적으로 직접 지정한 값 - null이면 자동계산(comprehensiveTarget+사용승인일) 사용,
   // 숫자(1~12)면 저장 시 site.comprehensiveMonthOverride/operationalMonthOverride로 저장되어 항상 우선한다.
@@ -409,12 +413,17 @@
     return "작동점검";
   }
 
-  // "이번달" 필터 - 이번 달이 그 현장의 종합점검월 또는 작동점검월과 같으면 true.
-  function isSiteInCurrentMonth(site) {
+  // 지정한 달(1~12)이 그 현장의 종합점검월 또는 작동점검월과 같으면 true - "이번달"/"다음달"/
+  // "지난달" 필터가 모두 이 함수 하나로 동작한다(달 숫자만 다르게 넘김).
+  function isSiteInMonth(site, month) {
     const sched = computeInspectionMonths(site);
     if (!sched) return false;
-    const month = new Date().getMonth() + 1;
     return sched.comprehensiveMonth === month || sched.operationalMonth === month;
+  }
+
+  // "이번달" 필터 - 이번 달이 그 현장의 종합점검월 또는 작동점검월과 같으면 true.
+  function isSiteInCurrentMonth(site) {
+    return isSiteInMonth(site, new Date().getMonth() + 1);
   }
 
   function showScreen(id) {
@@ -431,6 +440,7 @@
     "screen-construction-company": "btnBackFromConstructionCompany",
     "screen-construction-estimates": "btnBackFromConstructionEstimates",
     "screen-construction-history": "btnBackFromConstructionHistory",
+    "screen-construction-job-detail": "btnBackFromConstructionJobDetail",
     "screen-site-entry-choice": "btnCancelEntryChoice",
     "screen-site-form": "btnCancelSiteForm",
     "screen-site-detail": "btnBackToSites",
@@ -589,10 +599,13 @@
   });
   // "점검팀" 홈 타일 - 기존 "거래처 보기"와 같은 화면(거래처 목록)을 그대로 연다.
   $("#btnHomeViewSites").addEventListener("click", () => { renderSites(); showScreen("screen-sites"); });
-  // "공사팀" 홈 타일 - 더 이상 공사팀 화면으로 가지 않고, 지적사항 메뉴를 바로 연다(사용자 요청).
+  // "공사팀" 홈 타일 - 업체 목록(거래처 재사용) → 견적서/공사내역 화면을 연다. 공사내역은
+  // 점검팀 기록(inspections/deficiencies)과 완전히 분리된 별도 저장소(constructionJobs)라 두
+  // 팀이 각자 관리한다(사용자 요청) - 점검팀이 "점검 완료 처리"를 누르면 그 날짜만 자동으로
+  // 여기 하나 만들어지고, 이후 내용은 공사팀이 채운다.
   $("#btnHomeConstructionTeam").addEventListener("click", () => {
-    renderDeficiencyHub().catch(reportLoadFailure);
-    showScreen("screen-deficiency-hub");
+    renderConstructionTeam().catch(reportLoadFailure);
+    showScreen("screen-construction-team");
   });
   $("#btnHomeScheduleManage").addEventListener("click", async () => {
     scheduleCalDate = new Date();
@@ -643,9 +656,102 @@
   $("#btnConstructionHistory").addEventListener("click", async () => {
     const site = await FireDB.getSite(currentConstructionSiteId);
     $("#constructionHistoryCompanyName").textContent = site ? site.name : "";
+    await renderConstructionHistory();
     showScreen("screen-construction-history");
   });
   $("#btnBackFromConstructionHistory").addEventListener("click", () => showScreen("screen-construction-company"));
+
+  // ---------- 공사팀: 공사내역(constructionJobs) - 점검팀 기록과 분리된 날짜별 이력 ----------
+  let currentConstructionJobId = null;
+
+  async function renderConstructionHistory() {
+    const jobs = await FireDB.getConstructionJobsBySite(currentConstructionSiteId);
+    jobs.sort((a, b) => (b.date || "").localeCompare(a.date || "")); // 최근 날짜가 위로
+    const list = $("#constructionHistoryList");
+    if (jobs.length === 0) {
+      list.innerHTML = `<div class="empty-state">등록된 공사내역이 없습니다.<br>점검팀이 점검을 완료 처리하면 자동으로 추가되거나, 직접 등록할 수 있습니다.</div>`;
+      return;
+    }
+    list.innerHTML = jobs.map((j) => {
+      const d = j.date ? new Date(j.date + "T00:00:00") : null;
+      const dateLabel = d && !isNaN(d) ? `${j.date} (${WEEKDAY_LABEL[d.getDay()]})` : (j.date || "");
+      return `
+        <div class="list-card" data-job="${j.id}">
+          <div class="list-card-title">
+            <span class="list-card-title-main">${escapeHtml(dateLabel)}</span>
+            <button type="button" class="list-card-menu-btn" data-menu-btn>⋯</button>
+          </div>
+          <div class="site-card-menu hidden" data-menu>
+            <button type="button" data-menu-edit-date>날짜 수정</button>
+            <button type="button" class="danger" data-menu-delete>삭제</button>
+          </div>
+          <div class="list-card-sub">${j.memo ? escapeHtml(j.memo) : "메모 없음"}</div>
+        </div>
+      `;
+    }).join("");
+
+    Array.from(list.querySelectorAll(".list-card")).forEach((el) => {
+      const jobId = el.dataset.job;
+      el.addEventListener("click", () => openConstructionJobDetail(jobId));
+      const menuBtn = el.querySelector("[data-menu-btn]");
+      const menu = el.querySelector("[data-menu]");
+      menuBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const wasOpen = menu === openSiteCardMenu;
+        closeSiteCardMenu();
+        if (!wasOpen) { menu.classList.remove("hidden"); openSiteCardMenu = menu; }
+      });
+      menu.addEventListener("click", (e) => e.stopPropagation());
+      menu.querySelector("[data-menu-edit-date]").addEventListener("click", async () => {
+        closeSiteCardMenu();
+        const job = jobs.find((j) => j.id === jobId);
+        const newDate = await promptDate("공사내역 날짜 수정", job.date);
+        if (!newDate) return;
+        await FireDB.updateConstructionJob(jobId, { date: newDate });
+        await renderConstructionHistory();
+      });
+      menu.querySelector("[data-menu-delete]").addEventListener("click", async () => {
+        closeSiteCardMenu();
+        const ok = await confirmDialog("이 공사내역을 삭제할까요?");
+        if (!ok) return;
+        await FireDB.deleteConstructionJob(jobId);
+        await renderConstructionHistory();
+      });
+    });
+  }
+
+  $("#btnAddConstructionJob").addEventListener("click", async () => {
+    const date = await promptDate("공사내역 날짜", todayISO());
+    if (!date) return;
+    await FireDB.addConstructionJob({ siteId: currentConstructionSiteId, date, memo: "", createdAt: new Date().toISOString() });
+    await renderConstructionHistory();
+  });
+
+  async function openConstructionJobDetail(jobId) {
+    currentConstructionJobId = jobId;
+    const job = await FireDB.getConstructionJob(jobId);
+    const d = job && job.date ? new Date(job.date + "T00:00:00") : null;
+    $("#constructionJobDateLabel").textContent = d && !isNaN(d) ? `${job.date} (${WEEKDAY_LABEL[d.getDay()]})` : (job ? job.date : "");
+    $("#constructionJobMemo").value = job ? (job.memo || "") : "";
+    showScreen("screen-construction-job-detail");
+  }
+
+  $("#btnSaveConstructionJob").addEventListener("click", async () => {
+    await FireDB.updateConstructionJob(currentConstructionJobId, { memo: $("#constructionJobMemo").value });
+    toast("저장되었습니다.", "success");
+    await renderConstructionHistory();
+    showScreen("screen-construction-history");
+  });
+
+  $("#btnDeleteConstructionJob").addEventListener("click", async () => {
+    const ok = await confirmDialog("이 공사내역을 삭제할까요?");
+    if (!ok) return;
+    await FireDB.deleteConstructionJob(currentConstructionJobId);
+    await renderConstructionHistory();
+    showScreen("screen-construction-history");
+  });
+
+  $("#btnBackFromConstructionJobDetail").addEventListener("click", () => showScreen("screen-construction-history"));
 
   // ---------- 탭 ----------
   // 자료를 불러오다 실패/시간초과되면(예: 불안정한 네트워크) 화면은 바뀌었는데 내용은 계속
@@ -1867,7 +1973,10 @@
     if (!ok || !galleryActiveInspectionId) return;
     const insp = await FireDB.getInspection(galleryActiveInspectionId);
     await FireDB.updateInspection(galleryActiveInspectionId, { status: "completed", completedDate: todayISO() });
-    if (insp) await ensureDeficiencyRoundForDate(insp.siteId, insp.scheduledDate);
+    if (insp) {
+      await ensureDeficiencyRoundForDate(insp.siteId, insp.scheduledDate);
+      await ensureConstructionJobForDate(insp.siteId, todayISO());
+    }
     toast("점검이 완료 처리되었습니다.", "success");
     await openInspectionDetail(galleryActiveInspectionId);
   });
@@ -2078,12 +2187,29 @@
       // "지적사항 없음"은 회차마다 따로 기록된다(round.noDeficiency) - 회차가 하나도 없는
       // 옛 현장(레거시)만 예외적으로 site.deficiencyReviewed를 그대로 본다.
       c.noDeficiency = latestRound ? !!latestRound.noDeficiency : !!s.deficiencyReviewed;
+      // "최신순" 정렬(점검완료일 기준)에 쓸 마지막 회차 날짜 - 회차가 없으면 null(정렬 시 맨 뒤로).
+      c.date = latestRound ? latestRound.date : null;
       countsBySite.set(s.id, c);
     });
     return countsBySite;
   }
 
+  // "이번달"/"다음달"/"지난달" 버튼이 가리키는 실제 달(1~12) - 오늘 기준으로 계산한다.
+  function defTargetMonth() {
+    const cur = new Date().getMonth() + 1;
+    if (defMonthFilter === "next") return cur === 12 ? 1 : cur + 1;
+    if (defMonthFilter === "last") return cur === 1 ? 12 : cur - 1;
+    return cur; // "this"
+  }
+
   async function renderDeficiencyHub() {
+    $("#btnDefSortByName").classList.toggle("active", defSortMode === "name" && !defMonthFilter);
+    $("#btnDefSortByRegion").classList.toggle("active", defSortMode === "region" && !defMonthFilter);
+    $("#btnDefSortByRecent").classList.toggle("active", defSortMode === "recent" && !defMonthFilter);
+    $("#btnDefFilterThisMonth").classList.toggle("active", defMonthFilter === "this");
+    $("#btnDefFilterNextMonth").classList.toggle("active", defMonthFilter === "next");
+    $("#btnDefFilterLastMonth").classList.toggle("active", defMonthFilter === "last");
+
     const [sites, defs, rounds] = await Promise.all([FireDB.getAllSites(), FireDB.getAllDeficiencies(), FireDB.getAllRounds()]);
     sites.sort((a, b) => a.name.localeCompare(b.name, "ko"));
     const countsBySite = latestRoundCountsBySite(sites, defs, rounds);
@@ -2093,19 +2219,37 @@
       return;
     }
 
-    const filtered = defFilters.size === 0
+    let filtered = defFilters.size === 0
       ? sites
       : sites.filter((s) => {
         const c = countsBySite.get(s.id) || { open: 0, resolved: 0 };
         return deficiencySiteStatuses(c, s).some((st) => defFilters.has(st));
       });
 
+    // "이번달"/"다음달"/"지난달"은 종합/작동점검월이 그 달에 해당하는 거래처만 남긴다(사용자 요청).
+    if (defMonthFilter) {
+      const month = defTargetMonth();
+      filtered = filtered.filter((s) => isSiteInMonth(s, month));
+    }
+
     if (filtered.length === 0) {
       list.innerHTML = `<div class="empty-state">선택한 조건에 맞는 거래처가 없습니다.</div>`;
       return;
     }
 
-    if (defSortMode === "region") {
+    // 월 필터가 켜져 있으면 그에 맞는 정렬을 강제한다(사용자 요청) - 이번달→최신순, 다음달/지난달→가나다순.
+    const effectiveSortMode = !defMonthFilter ? defSortMode : (defMonthFilter === "this" ? "recent" : "name");
+
+    if (effectiveSortMode === "recent") {
+      // 점검완료일(최근 회차 날짜) 기준 최신순 - 날짜가 없는 거래처는 맨 뒤로 보낸다.
+      filtered = [...filtered].sort((a, b) => {
+        const da = (countsBySite.get(a.id) || {}).date || "";
+        const db = (countsBySite.get(b.id) || {}).date || "";
+        return db.localeCompare(da);
+      });
+    }
+
+    if (effectiveSortMode === "region") {
       renderDeficiencyHubByRegion(filtered, countsBySite);
       return;
     }
@@ -2116,16 +2260,31 @@
   $("#btnDefSortByName").addEventListener("click", () => {
     defSortMode = "name";
     defSelectedRegion = null;
-    $("#btnDefSortByName").classList.add("active");
-    $("#btnDefSortByRegion").classList.remove("active");
+    defMonthFilter = null;
     renderDeficiencyHub();
   });
   $("#btnDefSortByRegion").addEventListener("click", () => {
     defSortMode = "region";
-    $("#btnDefSortByRegion").classList.add("active");
-    $("#btnDefSortByName").classList.remove("active");
+    defMonthFilter = null;
     renderDeficiencyHub();
   });
+  $("#btnDefSortByRecent").addEventListener("click", () => {
+    defSortMode = "recent";
+    defSelectedRegion = null;
+    defMonthFilter = null;
+    renderDeficiencyHub();
+  });
+  // "이번달"/"다음달"/"지난달"은 서로 배타적인 토글 버튼 - 켜져 있는 걸 다시 누르면 꺼진다(전체 보기로 복귀).
+  function wireDefMonthButton(id, key) {
+    $("#" + id).addEventListener("click", () => {
+      defMonthFilter = defMonthFilter === key ? null : key;
+      defSelectedRegion = null;
+      renderDeficiencyHub();
+    });
+  }
+  wireDefMonthButton("btnDefFilterThisMonth", "this");
+  wireDefMonthButton("btnDefFilterNextMonth", "next");
+  wireDefMonthButton("btnDefFilterLastMonth", "last");
   $$("#defFilterToolbar .filter-chip").forEach((btn) => {
     btn.addEventListener("click", () => {
       const key = btn.dataset.filter;
@@ -2162,6 +2321,16 @@
     const rounds = await FireDB.getRoundsBySite(siteId);
     if (rounds.some((r) => r.date === date)) return;
     await FireDB.addRound({ siteId, date, label: "", createdAt: new Date().toISOString() });
+  }
+
+  // "점검 완료 처리"를 누르면 그 날짜만 공사팀에도 자동으로 넘겨준다(사용자 요청) - 점검팀
+  // 기록을 그대로 복사하는 게 아니라 날짜 하나만 공사팀 저장소(constructionJobs)에 새로 만들어,
+  // 그 뒤 내용은 공사팀이 독립적으로 채운다. 같은 날짜가 이미 있으면 중복 생성하지 않는다.
+  async function ensureConstructionJobForDate(siteId, date) {
+    if (!date) return;
+    const jobs = await FireDB.getConstructionJobsBySite(siteId);
+    if (jobs.some((j) => j.date === date)) return;
+    await FireDB.addConstructionJob({ siteId, date, memo: "", createdAt: new Date().toISOString() });
   }
 
   async function openSiteRounds(siteId) {
@@ -3206,8 +3375,8 @@
   // 확인 필요), 새 버전이 있으면 외부 브라우저로 APK 다운로드 URL을 열어 다운로드->설치를 대신 시작해준다.
   // version.js의 APP_VERSION은 마지막으로 웹 파일이 바뀐 실제 날짜/시간(한국시간)이고,
   // APP_VERSION_CODE/NAME은 APK를 새로 빌드해서 배포할 때만 올리는 별개의 버전 번호다.
-  const APP_VERSION_CODE = 44;
-  const APP_VERSION_NAME = "1.43";
+  const APP_VERSION_CODE = 45;
+  const APP_VERSION_NAME = "1.44";
   const UPDATE_MANIFEST_URL = "https://green3077.github.io/sobang1004/version.json";
   const IS_NATIVE_UPDATE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
   // 이 프로젝트는 번들러(webpack/vite 등)를 쓰지 않는 순수 스크립트 앱이라 @capacitor/core 전체가
@@ -3289,13 +3458,14 @@
   // 자동 저장되므로 여기 다시 담지 않는다(용량 낭비 + 중복). 이행완료보고서도 지적사항 데이터가
   // 있으면 언제든 다시 만들 수 있어 별도로 담지 않는다 - "다시 만들 수 없는 원본 텍스트"만 백업한다.
   async function collectBackupData() {
-    const [sites, inspections, deficiencies, schedules] = await Promise.all([
+    const [sites, inspections, deficiencies, schedules, constructionJobs] = await Promise.all([
       FireDB.getAllSites(),
       FireDB.getAllInspections(),
       FireDB.getAllDeficiencies(),
       FireDB.getAllSchedules(),
+      FireDB.getAllConstructionJobs(),
     ]);
-    return { version: 1, exportedAt: new Date().toISOString(), company: await getCompanyProfile(), sites, inspections, deficiencies, schedules };
+    return { version: 1, exportedAt: new Date().toISOString(), company: await getCompanyProfile(), sites, inspections, deficiencies, schedules, constructionJobs };
   }
 
   function backupFilenameDate() {
@@ -3330,7 +3500,7 @@
   $("#btnDataRestore").addEventListener("click", async () => {
     const ok = await confirmDialog(
       "가장 최근 백업으로 복구할까요?\n" +
-      "현재 거래처·점검·지적사항·스케줄 자료가 백업 시점 내용으로 전부 바뀌며, 이 앱을 쓰는 모든 사람에게 적용됩니다.\n" +
+      "현재 거래처·점검·지적사항·스케줄·공사내역 자료가 백업 시점 내용으로 전부 바뀌며, 이 앱을 쓰는 모든 사람에게 적용됩니다.\n" +
       "되돌릴 수 없습니다."
     );
     if (!ok) return;
@@ -3361,6 +3531,7 @@
         await FireDB.setScheduleSiteIds(sched.id, sched.siteIds || []);
         await FireDB.setScheduleConfirmed(sched.id, !!sched.confirmed);
       }
+      for (const job of data.constructionJobs || []) await FireDB.addConstructionJob(job);
       if (data.company) await saveCompanyProfile(data.company);
 
       $("#backupStatus").textContent = `복구 완료: ${latest.name}`;

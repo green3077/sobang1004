@@ -1,6 +1,6 @@
 {
-  "versionCode": 44,
-  "versionName": "1.43",
+  "versionCode": 45,
+  "versionName": "1.44",
   "apkUrl": "https://green3077.github.io/sobang1004/fire-inspection.apk",
-  "notes": "일정관리에서 근처 맛집 추천 기능 삭제"
+  "notes": "점검팀/공사팀 기록 분리(점검완료 시 공사팀에 자동 등록) + 지적사항 최신순/이번달/다음달/지난달 정렬 + hwpx 사진 크기 버그 수정(구버전 한글 대응)"
 }

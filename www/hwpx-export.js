@@ -200,20 +200,14 @@ const HwpxExport = (() => {
   // 얻은 진짜 예제 XML을 그대로 본떠 만들었다(요소 순서/네임스페이스가 실제와 정확히 일치해야 한글이 연다).
   //
   // hwpWidth/hwpHeight: 화면/표 칸에 실제로 그려질 "표시 크기"(HWPUNIT 단위).
-  // pixelWidth/pixelHeight: 실제로 저장한 이미지 파일 자체의 픽셀 크기. hc:img의 imgRect/hp:imgClip/
-  // hp:imgDim은 "이미지 파일 안에서 어느 픽셀 범위를 보여줄지"를 픽셀 좌표로 나타내는 필드라서 반드시
-  // pixelWidth/pixelHeight를 써야 한다 - 예전에 여기 표시 크기(hwpWidth/hwpHeight)를 넣었더니 뷰어가
-  // "이 이미지는 원래 20000x15000픽셀짜리"라고 잘못 믿고 실제로는 훨씬 작은 이미지를 그 큰 좌표계의
-  // 극히 일부로 해석해 심하게 확대/뭉개진 상태로 보여주는 문제가 있었다("사진이 확대되어 표시됨").
+  // pixelWidth/pixelHeight: 실제로 저장한 이미지 파일 자체의 픽셀 크기.
   //
-  // hp:orgSz는 반대로 "원본(=imgDim과 같은 픽셀값) 크기"를 넣어야 한다 - 표시 크기(hwpWidth/hwpHeight)를
-  // 그대로 넣으면 이번엔 실제 PC 한글(Hwp.exe)에서 사진이 훨씬 작게(수 mm 크기로) 표시되는 문제가
-  // 있었다(2026-08-19, "여전히 hwpx 사진은 작게 보이네" 리포트로 발견). 실제 한글이 최종 표시 크기를
-  // hp:curSz/hp:sz 그대로 쓰지 않고 "imgDim(픽셀, 원본) × (curSz/orgSz 비율)"로 재계산하기 때문 -
-  // HwpFrame.HwpObject COM 자동화로 다양한 조합을 실제로 렌더링(PDF로 저장 후 그림 크기 측정)해서
-  // 확인했다: orgSz=픽셀값, curSz/sz=표시 크기로 두면 이 재계산 결과가 정확히 의도한 표시 크기가 되고,
-  // imgRect/imgClip/imgDim은 그대로 픽셀값이라 위 확대 버그도 재발하지 않는다(hc:scaMatrix로 비율을
-  // 넣는 방법도 시도했으나 실제 한글이 그 값을 아예 무시하는 것으로 확인되어 폐기).
+  // 2026-08-19/21 세션에서는 이 함수를 COM 자동화로 실제 한글(Hwp.exe) PDF 렌더링 결과를 재보며
+  // "orgSz=픽셀값, curSz=표시크기"로 튜닝했었는데, 2026-08-27에 사용자가 "한글 2020에서는 사진이 매우
+  // 확대되어 보인다"고 리포트 - 그 튜닝이 당시 테스트에 쓰인 한글 버전(2022로 추정)에서만 우연히 맞는
+  // 값이었을 가능성이 있어, 이번엔 추측 대신 실제 한글이 저장한 hwpx 원본 파일을 직접 뜯어봤다(오픈소스
+  // hwpxlib 프로젝트의 테스트 fixture, 544x184px짜리 google.jpg를 넣은 진짜 예제). 아래가 그 구조 -
+  // buildPicElement 안의 상세 주석 참고.
   function buildPicElement(doc, binaryId, hwpWidth, hwpHeight, pixelWidth, pixelHeight) {
     const picId = String(1000000000 + Math.floor(Math.random() * 900000000));
     const pic = el(doc, "hp:pic", {
@@ -229,8 +223,22 @@ const HwpxExport = (() => {
       instid: String(1000000000 + Math.floor(Math.random() * 900000000)),
       reverse: "0"
     });
+    // hp:orgSz/hp:imgDim 단위를 진짜 한글이 저장한 hwpx 원본 파일(오픈소스 hwpxlib의 테스트 fixture,
+    // 544x184px짜리 google.jpg를 넣은 실제 예제)을 직접 뜯어보고 정정했다(2026-08-27, 한글 2020에서
+    // "사진이 매우 확대되어 보임" 리포트로 조사) - 그 예제에서 hp:orgSz(17664x5975)와 hp:curSz(25942x8775)는
+    // 둘 다 HWPUNIT 물리 크기이고 그 비율(25942/17664=1.4686...)이 renderingInfo의 scaMatrix 값과 정확히
+    // 일치했다 - 즉 orgSz는 "삽입 당시 크기"(리사이즈 이력의 기준점)일 뿐 픽셀 수가 절대 아니다. 반면
+    // hp:imgDim(40800x13800)/hp:imgClip은 원본 픽셀(544x184)에 정확히 75를 곱한 값(40800/544=75.0,
+    // 13800/184=75.0) - 75 = 7200(HWPUNIT/inch) ÷ 96(한글이 래스터 이미지에 항상 가정하는 dpi) 이다.
+    // 예전 코드는 이 두 단위(HWPUNIT 물리크기 vs "96dpi 가정 픽셀환산값")를 혼동해서 orgSz/imgRect에
+    // 그냥 픽셀 개수를 그대로 넣고 있었다 - 한글 2022는 이 값을 관대하게 재해석해서 우연히 정상 표시됐지만,
+    // 2020은 그 값을 곧이곧대로 써서 그림이 크게 부풀려 보이는 문제("확대")가 있었던 것으로 보인다.
+    // 여기서는 리사이즈 없이 딱 표시 크기 그대로 삽입되는 경우이므로 orgSz=curSz(비율 1, scaMatrix 항등)로 둔다.
+    const PIXEL_TO_HWPUNIT_96DPI = 75; // 7200 / 96
+    const dimWidth = Math.round(pixelWidth * PIXEL_TO_HWPUNIT_96DPI);
+    const dimHeight = Math.round(pixelHeight * PIXEL_TO_HWPUNIT_96DPI);
     pic.appendChild(el(doc, "hp:offset", { x: "0", y: "0" }));
-    pic.appendChild(el(doc, "hp:orgSz", { width: String(pixelWidth), height: String(pixelHeight) }));
+    pic.appendChild(el(doc, "hp:orgSz", { width: String(hwpWidth), height: String(hwpHeight) }));
     pic.appendChild(el(doc, "hp:curSz", { width: String(hwpWidth), height: String(hwpHeight) }));
     pic.appendChild(el(doc, "hp:flip", { horizontal: "0", vertical: "0" }));
     pic.appendChild(
@@ -243,17 +251,17 @@ const HwpxExport = (() => {
     pic.appendChild(ri);
     // 실제 예제에서 그림 데이터 참조는 hp:img가 아니라 hc:img(core 네임스페이스)이다.
     pic.appendChild(hcEl(doc, "hc:img", { binaryItemIDRef: binaryId, bright: "0", contrast: "0", effect: "REAL_PIC", alpha: "0" }));
-    // 아래 세 요소는 표시 크기(hwpWidth/hwpHeight)가 아니라 실제 이미지 파일의 픽셀 크기를 써야 한다 -
-    // 위 함수 주석 참고.
+    // hp:imgRect는 orgSz와 같은 좌표계(HWPUNIT 물리크기) - 크롭 없이 이미지 전체를 보여주므로 (0,0)~(orgSz).
     const imgRect = el(doc, "hp:imgRect", {});
     imgRect.appendChild(hcEl(doc, "hc:pt0", { x: "0", y: "0" }));
-    imgRect.appendChild(hcEl(doc, "hc:pt1", { x: String(pixelWidth), y: "0" }));
-    imgRect.appendChild(hcEl(doc, "hc:pt2", { x: String(pixelWidth), y: String(pixelHeight) }));
-    imgRect.appendChild(hcEl(doc, "hc:pt3", { x: "0", y: String(pixelHeight) }));
+    imgRect.appendChild(hcEl(doc, "hc:pt1", { x: String(hwpWidth), y: "0" }));
+    imgRect.appendChild(hcEl(doc, "hc:pt2", { x: String(hwpWidth), y: String(hwpHeight) }));
+    imgRect.appendChild(hcEl(doc, "hc:pt3", { x: "0", y: String(hwpHeight) }));
     pic.appendChild(imgRect);
-    pic.appendChild(el(doc, "hp:imgClip", { left: "0", right: String(pixelWidth), top: "0", bottom: String(pixelHeight) }));
+    // hp:imgClip은 imgDim과 같은 좌표계(96dpi 환산 픽셀값) - 크롭 없이 전체를 보여주므로 (0,0)~(imgDim).
+    pic.appendChild(el(doc, "hp:imgClip", { left: "0", right: String(dimWidth), top: "0", bottom: String(dimHeight) }));
     pic.appendChild(el(doc, "hp:inMargin", { left: "0", right: "0", top: "0", bottom: "0" }));
-    pic.appendChild(el(doc, "hp:imgDim", { dimwidth: String(pixelWidth), dimheight: String(pixelHeight) }));
+    pic.appendChild(el(doc, "hp:imgDim", { dimwidth: String(dimWidth), dimheight: String(dimHeight) }));
     pic.appendChild(el(doc, "hp:effects", {}));
     pic.appendChild(el(doc, "hp:sz", { width: String(hwpWidth), widthRelTo: "ABSOLUTE", height: String(hwpHeight), heightRelTo: "ABSOLUTE", protect: "0" }));
     // treatAsChar="1": 텍스트 흐름에 얹혀 셀 안에 들어가는 인라인 그림(표 밖으로 떠다니지 않음) - 실제 예제와 동일.
