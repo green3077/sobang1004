@@ -401,8 +401,9 @@
   }
 
   // 점검 회차(날짜)가 작동점검인지 종합점검인지 - computeInspectionMonths로 구한 현장별
-  // 종합/작동 대상월과 그 날짜의 월을 비교해서 판단한다. 대상월을 아직 모르면(사용승인일/종합점검대상
-  // 미입력) 기본값인 작동점검으로 표시.
+  // 종합/작동 대상월과 그 날짜의 월을 비교해서 판단한다. 어느 쪽 대상월과도 안 맞으면(정기
+  // 법정점검이 아니라 그 사이에 도는 통상적인 방문) 월점검으로 표시한다(사용자 요청) - 대상월을
+  // 아직 모를 때(사용승인일/종합점검대상 미입력)도 마찬가지로 월점검.
   function inspectionTypeForMonth(site, dateStr) {
     const sched = computeInspectionMonths(site);
     const month = parseInt((dateStr || todayISO()).slice(5, 7), 10);
@@ -410,7 +411,7 @@
       if (sched.comprehensiveMonth === month) return "종합점검";
       if (sched.operationalMonth === month) return "작동점검";
     }
-    return "작동점검";
+    return "월점검";
   }
 
   // 지정한 달(1~12)이 그 현장의 종합점검월 또는 작동점검월과 같으면 true - "이번달"/"다음달"/
