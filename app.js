@@ -3329,46 +3329,7 @@
     $("#changeHistoryEnabledToggle").checked = isChangeHistoryVisible();
     renderDriveStatus();
     $("#authCurrentUser").textContent = Auth.getDisplayName();
-    renderCommandLog();
   }
-
-  // ---------- 명령어 기록 (Claude Code로 이 앱을 수정할 때 입력한 명령을 시간순으로 기록) ----------
-  // 앱 코드가 자동으로 수집하는 게 아니라(이 화면과 지금 개발 세션 사이엔 연결이 없음), Claude Code가
-  // 작업할 때마다 command-log.json에 항목을 직접 추가하고 배포하는 방식이다. version.json/update
-  // 체크와 같은 패턴으로 GitHub Pages의 절대 URL에서 항상 최신 내용을 불러온다.
-  const COMMAND_LOG_URL = "https://green3077.github.io/sobang1004/command-log.json";
-
-  function formatCommandLogTime(iso) {
-    const d = new Date(iso);
-    if (isNaN(d)) return iso;
-    const pad = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  }
-
-  async function renderCommandLog() {
-    const listEl = $("#commandLogList");
-    if (!listEl) return;
-    listEl.textContent = "불러오는 중...";
-    try {
-      const res = await fetch(COMMAND_LOG_URL + "?t=" + Date.now());
-      if (!res.ok) throw new Error("fetch_failed_" + res.status);
-      const entries = await res.json();
-      if (!Array.isArray(entries) || entries.length === 0) {
-        listEl.textContent = "기록된 명령이 없습니다.";
-        return;
-      }
-      const sorted = [...entries].sort((a, b) => new Date(b.at) - new Date(a.at));
-      listEl.innerHTML = sorted.map((e) => `
-        <div class="command-log-item">
-          <div class="command-log-time">${escapeHtml(formatCommandLogTime(e.at))}</div>
-          <div class="command-log-text">${escapeHtml(e.text || "")}</div>
-        </div>
-      `).join("");
-    } catch (err) {
-      listEl.textContent = "명령어 기록을 불러오지 못했습니다.";
-    }
-  }
-  $("#btnRefreshCommandLog").addEventListener("click", renderCommandLog);
 
   // ---------- 앱 버전 / 업데이트 확인 ----------
   // 사이드로드 앱(스토어 밖에서 apk로 설치)은 스스로를 조용히 덮어쓸 수 없으므로(설치는 항상 사용자
