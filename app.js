@@ -2070,15 +2070,22 @@
     return statuses;
   }
 
+  // 회차(날짜) 하나의 지적사항 진행 상태를 검토중/미해결/해결/지적사항 없음 중 하나로 나타낸다
+  // (사용자 요청) - 지적사항이 등록되지 않았으면 검토중, 미해결 항목이 하나라도 있으면 미해결,
+  // 전부 이행완료됐으면 해결, "지적사항 없음"으로 표시해둔 회차면 지적사항 없음. 지적사항 허브의
+  // 업체 배지와 회차 목록의 날짜별 배지가 같은 기준을 쓰도록 공용 함수로 뺐다.
+  function roundStatusBadge(round, openCount, resolvedCount) {
+    if (round && round.noDeficiency) return { label: "지적사항 없음", cls: "badge-scheduled" };
+    if (openCount > 0) return { label: "미해결", cls: "badge-open" };
+    if (resolvedCount > 0) return { label: "해결", cls: "badge-resolved" };
+    return { label: "검토중", cls: "badge-pending" };
+  }
+
   function deficiencyHubCardHtml(s, c) {
-    const noneBadge = c.noDeficiency
-      ? `<span class="badge badge-scheduled">지적사항 없음</span>`
-      : `<span class="badge badge-pending">검토중</span>`;
-    const badges = [
-      c.open > 0 ? `<span class="badge badge-open">미해결 ${c.open}</span>` : "",
-      c.resolved > 0 ? `<span class="badge badge-resolved">해결 ${c.resolved}</span>` : "",
-      (c.open === 0 && c.resolved === 0) ? noneBadge : ""
-    ].join(" ");
+    // 업체 배지는 미해결/해결을 같이 보여주지 않고 최신 회차 기준 단일 상태 하나만 보여준다
+    // (사용자 요청) - 미해결이 하나라도 있으면 그게 우선.
+    const status = roundStatusBadge({ noDeficiency: c.noDeficiency }, c.open, c.resolved);
+    const badges = `<span class="badge ${status.cls}">${status.label}</span>`;
     return `
       <div class="list-card" data-site="${s.id}">
         <div class="list-card-title">
@@ -2365,29 +2372,29 @@
       return;
     }
 
-    // 날짜(요일)와 그 날짜의 점검 완료 여부만 보여준다(사용자 요청) - 지적사항 미해결/해결
-    // 개수 등은 회차 상세(openRoundDeficiencies)에 들어가면 보이므로 목록에서는 뺀다. 완료
-    // 여부는 지적사항이 아니라 그 날짜의 점검(inspections) 상태를 그대로 따른다 - "점검 완료
-    // 처리"를 눌러야 반영되는 그 상태와 같은 값(status === "completed"). 회차는 이제
-    // completedDate로 생성되지만(예정일과 다른 날 완료 처리한 경우를 위해), 예정일에 맞춰
-    // 만들어진 옛 회차도 여전히 있을 수 있어 scheduledDate/completedDate 둘 다로 매칭한다.
-    const siteInspections = await FireDB.getInspectionsBySite(currentDeficiencySiteId);
-    const inspByDate = new Map();
-    siteInspections.forEach((insp) => {
-      if (insp.status !== "completed") return;
-      if (insp.scheduledDate) inspByDate.set(insp.scheduledDate, insp);
-      if (insp.completedDate) inspByDate.set(insp.completedDate, insp);
+    // 날짜(요일) 옆 배지는 그 날짜의 점검 완료 여부(예정/완료)가 아니라 그 회차에 등록된
+    // 지적사항 상태(검토중/미해결/해결/지적사항 없음)를 보여준다(사용자 요청) - roundStatusBadge
+    // 참고, 지적사항 허브의 업체 배지와 같은 기준.
+    const siteDefs = await FireDB.getDeficienciesBySite(currentDeficiencySiteId);
+    const defsByRound = new Map();
+    siteDefs.forEach((d) => {
+      const arr = defsByRound.get(d.roundId) || [];
+      arr.push(d);
+      defsByRound.set(d.roundId, arr);
     });
     list.innerHTML = rounds.map((r) => {
       const d = r.date ? new Date(r.date + "T00:00:00") : null;
       const dateLabel = d && !isNaN(d) ? `${r.date} (${WEEKDAY_LABEL[d.getDay()]})` : (r.date || "");
-      const done = inspByDate.has(r.date);
+      const roundDefs = defsByRound.get(r.id) || [];
+      const open = roundDefs.filter((x) => !x.resolved).length;
+      const resolved = roundDefs.filter((x) => x.resolved).length;
+      const status = roundStatusBadge(r, open, resolved);
       return `
         <div class="list-card" data-round="${r.id}">
           <div class="list-card-title">
             <span class="list-card-title-main">${escapeHtml(dateLabel)}</span>
             <span class="list-card-title-right">
-              <span class="badge badge-${done ? "completed" : "scheduled"}">${done ? "완료" : "예정"}</span>
+              <span class="badge ${status.cls}">${status.label}</span>
               <button type="button" class="list-card-menu-btn" data-menu-btn>⋯</button>
             </span>
           </div>
