@@ -48,4 +48,8 @@
     <!-- Android 9(API 28) 이하에서 FileSaver가 공용 다운로드 폴더에 직접 쓰기 위해 필요.
          10 이상은 MediaStore.Downloads를 쓰므로 이 권한이 아예 필요/요청되지 않는다. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <!-- UpdateBridge.downloadAndInstall()이 새 APK를 내려받아 바로 설치 화면을 띄우기 위해 필요.
+         API 26+에서는 이 권한을 선언해도 자동으로 허용되는 게 아니라, 설치 시도 시 시스템이
+         "이 출처의 앱 설치 허용" 설정 화면을 자동으로 띄워 사용자가 직접 허용해야 한다(1회성). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 </manifest>

@@ -3451,11 +3451,18 @@
 
   // ---------- 앱 버전 / 업데이트 확인 ----------
   // 사이드로드 앱(스토어 밖에서 apk로 설치)은 스스로를 조용히 덮어쓸 수 없으므로(설치는 항상 사용자
-  // 확인 필요), 새 버전이 있으면 외부 브라우저로 APK 다운로드 URL을 열어 다운로드->설치를 대신 시작해준다.
+  // 확인 필요), 새 버전이 있으면 APK를 앱이 직접 캐시 폴더로 내려받은 뒤(UpdateBridge.downloadAndInstall)
+  // 시스템 설치 화면을 바로 띄운다 - 사용자는 "업데이트 확인" -> "새 버전 다운로드하기" 두 번만 누르면
+  // 된다(예전엔 외부 브라우저로 다운로드 URL만 열어줘서, 다운로드 완료 알림을 따로 탭해야 설치 화면이
+  // 떴다). Android 8+ 기기에서 이 앱에 "출처를 알 수 없는 앱 설치" 권한이 아직 없으면, 설치 화면을
+  // 띄우려는 순간 시스템이 자동으로 그 설정 화면을 보여준다 - 사용자가 허용하고 뒤로 오면 설치 화면이
+  // 다시 뜬다(1회성, 다음 업데이트부터는 안 뜸). 이 downloadAndInstall 자체가 새 네이티브 코드라
+  // 구버전 APK(v46 이하)에서 이 업데이트로 넘어올 때 한 번은 예전 방식(구버전에 남아있는
+  // openExternal 경로)으로 받아야 한다 - 그 이후 버전부터 앱 내 업데이트가 동작한다.
   // version.js의 APP_VERSION은 마지막으로 웹 파일이 바뀐 실제 날짜/시간(한국시간)이고,
   // APP_VERSION_CODE/NAME은 APK를 새로 빌드해서 배포할 때만 올리는 별개의 버전 번호다.
-  const APP_VERSION_CODE = 46;
-  const APP_VERSION_NAME = "1.45";
+  const APP_VERSION_CODE = 47;
+  const APP_VERSION_NAME = "1.46";
   const UPDATE_MANIFEST_URL = "https://green3077.github.io/sobang1004/version.json";
   const IS_NATIVE_UPDATE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
   // 이 프로젝트는 번들러(webpack/vite 등)를 쓰지 않는 순수 스크립트 앱이라 @capacitor/core 전체가
@@ -3473,12 +3480,33 @@
   $("#appVersionText").textContent =
     "현재 버전: v" + APP_VERSION_NAME + (typeof APP_VERSION !== "undefined" ? " (빌드: " + APP_VERSION + ")" : "");
 
+  let updateInProgress = false;
+
   $("#btnCheckUpdate").addEventListener("click", async () => {
     if (pendingApkUrl) {
       if (IS_NATIVE_UPDATE) {
-        callUpdateBridge("openExternal", { url: pendingApkUrl }).catch(() => {
-          $("#updateStatus").textContent = "업데이트 파일을 여는 데 실패했습니다.";
+        if (updateInProgress) return;
+        updateInProgress = true;
+        $("#btnCheckUpdate").disabled = true;
+        $("#updateStatus").textContent = "다운로드 중...";
+        // native-bridge.js가 제공하는 저수준 이벤트 API(callUpdateBridge와 마찬가지로 registerPlugin
+        // 없이 동작) - UpdateBridge.java가 다운로드 도중 보내는 "downloadProgress" 이벤트를 받아
+        // 진행률을 화면에 표시한다.
+        const listener = window.Capacitor.addListener("UpdateBridge", "downloadProgress", (data) => {
+          $("#updateStatus").textContent = "다운로드 중... " + data.percent + "%";
         });
+        try {
+          await callUpdateBridge("downloadAndInstall", { url: pendingApkUrl });
+          $("#updateStatus").textContent = "설치 화면이 열렸습니다. 안내에 따라 설치를 완료해주세요.";
+          $("#btnCheckUpdate").textContent = "업데이트 확인";
+          pendingApkUrl = null;
+        } catch (e) {
+          $("#updateStatus").textContent = "업데이트 다운로드/설치에 실패했습니다. 네트워크를 확인해주세요.";
+        } finally {
+          listener.remove();
+          updateInProgress = false;
+          $("#btnCheckUpdate").disabled = false;
+        }
       } else {
         window.open(pendingApkUrl, "_blank");
       }
