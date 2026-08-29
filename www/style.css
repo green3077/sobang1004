@@ -264,6 +264,24 @@ body {
 .field-row .field { flex: 1; }
 .field-static { color: var(--accent-dark) !important; font-weight: 700 !important; font-size: 16px !important; }
 
+.completion-date-range { margin-top: 16px; margin-bottom: 4px; }
+.completion-date-range-label { display: block; font-size: 15px; color: var(--text-dim); font-weight: 600; margin-bottom: 6px; }
+.completion-date-range-row { display: flex; align-items: center; gap: 10px; }
+.completion-date-btn {
+  flex: 1;
+  background: #fff;
+  border: 2px solid var(--accent);
+  color: var(--accent-dark);
+  border-radius: 10px;
+  padding: 13px 10px;
+  font-size: 17px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+}
+.completion-date-btn:active { background: var(--gold-bg); }
+.completion-date-tilde { font-size: 17px; font-weight: 700; color: var(--text-dim); flex-shrink: 0; }
+
 input[type="text"], input[type="date"], input[type="tel"], select, textarea {
   background: #fff;
   border: 2px solid var(--border);

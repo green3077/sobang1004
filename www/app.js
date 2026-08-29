@@ -2206,6 +2206,39 @@
   let currentRoundId = null;
   let currentDeficiencies = [];
 
+  // 이행완료 보고서의 "이행조치 일자" 시작/종료 날짜 - 회차(지적사항 화면)를 새로 열 때마다 오늘 날짜로
+  // 초기화하고(openRoundDeficiencies), 목록 안에서 항목을 추가/수정해 화면이 다시 그려져도(renderDeficiencies)
+  // 사용자가 이미 골라둔 값은 그대로 유지한다 - 그래서 이 초기화는 renderDeficiencies가 아니라
+  // openRoundDeficiencies에서만 한다.
+  let completionDateStart = todayISO();
+  let completionDateEnd = todayISO();
+
+  // "YYYY-MM-DD" -> "YYYY. M. D." (공식 서식의 ". . . ~ . . ." 자리에 맞는 표기).
+  function formatDateDot(iso) {
+    const m = (iso || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return iso || "";
+    return `${m[1]}. ${parseInt(m[2], 10)}. ${parseInt(m[3], 10)}.`;
+  }
+
+  function renderCompletionDateRangeButtons() {
+    $("#btnCompletionDateStart").textContent = formatDateDot(completionDateStart);
+    $("#btnCompletionDateEnd").textContent = formatDateDot(completionDateEnd);
+  }
+
+  $("#btnCompletionDateStart").addEventListener("click", async () => {
+    const picked = await promptDate("이행조치 시작 날짜", completionDateStart);
+    if (!picked) return;
+    completionDateStart = picked;
+    renderCompletionDateRangeButtons();
+  });
+
+  $("#btnCompletionDateEnd").addEventListener("click", async () => {
+    const picked = await promptDate("이행조치 종료 날짜", completionDateEnd);
+    if (!picked) return;
+    completionDateEnd = picked;
+    renderCompletionDateRangeButtons();
+  });
+
   function findDeficiency(defId) {
     return currentDeficiencies.find((d) => d.id === defId);
   }
@@ -2692,6 +2725,9 @@
     currentRoundId = roundId;
     currentDeficiencies = await FireDB.getDeficienciesByRound(roundId);
     currentDeficiencies.sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
+    completionDateStart = todayISO();
+    completionDateEnd = todayISO();
+    renderCompletionDateRangeButtons();
     await renderDeficiencies();
     showScreen("screen-deficiencies");
   }
@@ -3066,8 +3102,8 @@
     const site = await FireDB.getSite(currentDeficiencySiteId);
     const company = await getCompanyProfile();
     const resolved = currentDeficiencies.filter((d) => d.resolved);
-    // 이행조치 일자는 더 이상 자동 기록하지 않고, 실제 제출 시점에 손으로 적도록 항상 공란으로 둔다.
-    const dateRange = ". . . ~ . . .";
+    // 이행조치 일자 - 지적사항 화면의 시작/종료 날짜 버튼(기본값 오늘, 클릭해서 변경 가능)에서 가져온다.
+    const dateRange = `${formatDateDot(completionDateStart)} ~ ${formatDateDot(completionDateEnd)}`;
 
     const photos = await FireDB.getPhotosBySite(currentDeficiencySiteId);
     const photoMap = new Map(photos.map((p) => [p.id, p]));
