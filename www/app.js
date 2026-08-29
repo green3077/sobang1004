@@ -432,19 +432,28 @@
   function guessFireStation(address) {
     const addr = (address || "").trim();
     if (!addr) return "";
-    // 지번 주소는 사용자가 "대구광역시"를 생략하고 구/군부터 바로 적는 경우가 있다(사용자 리포트:
-    // "서재리 1118"로 입력하면 관할소방서가 안 나오고 "서재로12길38"(도로명, 지도 앱에서 그대로
-    // 복사해와서 "대구광역시..."가 붙어있음)로 입력하면 나온다, 2026-08-29) - "대구"로 시작하는지만
-    // 보면 그런 경우를 놓친다. "대구"가 문자열 어디에든 있으면 대구로 보고, "대구"가 아예 없어도
-    // "달성군"/"군위군"은 전국에서 대구에만 있는 이름이라(다른 시/도에 동명 구/군 없음) 안전하게
-    // 그 자체로 대구로 판단할 수 있다. 반면 "중구"/"동구"/"서구"/"남구"/"북구" 같은 흔한 구 이름은
-    // 부산/인천/대전/광주/울산 등에도 있어 "대구" 표시 없이는 오판할 위험이 있으므로 그대로 둔다.
-    if (addr.includes("대구") || addr.includes("달성군") || addr.includes("군위군")) {
+    // 지번 주소는 사용자가 "대구광역시"뿐 아니라 구/군, 심지어 읍/면까지 생략하고 리·동부터 바로
+    // 적는 경우가 있다(사용자 리포트: "서재리 1118"만 입력하면 관할소방서가 안 나온다, 2026-08-29 -
+    // "서재리"는 "대구", "달성군", "다사읍" 중 어느 것도 안 붙어있었음). "대구"가 문자열 어디에든
+    // 있으면 대구로 보고, "대구"가 아예 없어도 "달성군"/"군위군"은 전국에서 대구에만 있는 이름이라
+    // (다른 시/도에 동명 구/군 없음) 그 자체로 대구로 판단할 수 있다. 그 밑의 법정리/동 이름들
+    // (DAEGU_BUK_GU_GANGBUK_DONGS/DAEGU_DALSEO_GU_GANGSEO_DONGS/DAEGU_DALSEONG_GUN_GANGSEO_AREAS -
+    // daegu.go.kr 관내현황에서 확인한 실제 동/리명)도 대구 밖에서는 거의 안 쓰이는 이름들이라 이걸로도
+    // 대구로 판단한다. 반면 "중구"/"동구"/"서구"/"남구"/"북구" 같은 흔한 구 이름은 부산/인천/대전/
+    // 광주/울산 등에도 있어 "대구" 표시 없이는 오판할 위험이 있으므로 그대로 둔다.
+    const hasKnownDaeguArea =
+      DAEGU_BUK_GU_GANGBUK_DONGS.some((a) => addr.includes(a)) ||
+      DAEGU_DALSEO_GU_GANGSEO_DONGS.some((a) => addr.includes(a)) ||
+      DAEGU_DALSEONG_GUN_GANGSEO_AREAS.some((a) => addr.includes(a));
+    if (addr.includes("대구") || addr.includes("달성군") || addr.includes("군위군") || hasKnownDaeguArea) {
       const gu = DAEGU_DISTRICTS.find((g) => addr.includes(g));
-      if (gu === "북구" && DAEGU_BUK_GU_GANGBUK_DONGS.some((dong) => addr.includes(dong))) {
+      // 이 동 이름 목록들은 daegu.go.kr 관내현황에서 확인한, 해당 소방서에만 있는 동/리명이라 - "북구"/
+      // "달서구"가 주소에 같이 안 적혀 있어도(리·동 이름만 적는 지번 주소, 위 hasKnownDaeguArea 참고)
+      // 이름 자체만으로 그 소방서로 판단해도 안전하다.
+      if (DAEGU_BUK_GU_GANGBUK_DONGS.some((dong) => addr.includes(dong))) {
         return "강북소방서";
       }
-      if (gu === "달서구" && DAEGU_DALSEO_GU_GANGSEO_DONGS.some((dong) => addr.includes(dong))) {
+      if (DAEGU_DALSEO_GU_GANGSEO_DONGS.some((dong) => addr.includes(dong))) {
         return "강서소방서";
       }
       if (DAEGU_DALSEONG_GUN_GANGSEO_AREAS.some((a) => addr.includes(a))) return "강서소방서";
