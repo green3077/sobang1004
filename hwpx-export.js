@@ -75,10 +75,9 @@ const HwpxExport = (() => {
     return false;
   }
 
-  // "성명:" / "전화번호:" / "소재지"처럼 라벨만 있는 run 바로 뒤에 값 run을 복제해서 삽입 (occurrence번째 일치).
-  // charPrIDRef를 넘기면 값 run에만 그 서식을 적용한다(라벨 자체는 원래 서식 그대로 유지) - 좁은 칸에
-  // 긴 전화번호가 줄바꿈되는 문제를 글자 폭 압축으로 막을 때 씀(registerCompactValueCharPr 참고).
-  function insertValueAfterLabelRun(doc, labelText, value, occurrence, charPrIDRef) {
+  // "성명:" / "소재지"처럼 라벨만 있는 run 바로 뒤에 값 run을 복제해서 삽입 (occurrence번째 일치) -
+  // 라벨과 값이 같은 줄에 붙는다. 값이 길어질 수 있는 칸(전화번호 등)은 insertValueAsNewLineAfterLabel을 쓴다.
+  function insertValueAfterLabelRun(doc, labelText, value, occurrence) {
     const ts = getTexts(doc);
     let count = 0;
     for (const t of ts) {
@@ -86,7 +85,6 @@ const HwpxExport = (() => {
         if (count === (occurrence || 0)) {
           const run = t.parentNode;
           const newRun = run.cloneNode(true);
-          if (charPrIDRef) newRun.setAttribute("charPrIDRef", charPrIDRef);
           newRun.getElementsByTagNameNS(HP, "t")[0].textContent = "   " + value;
           run.parentNode.insertBefore(newRun, run.nextSibling);
           return true;
@@ -97,31 +95,33 @@ const HwpxExport = (() => {
     return false;
   }
 
-  // "소방안전관리자" 칸의 "성명:"/"전화번호:" 줄은 폭이 좁아(약 35mm) 값이 길면(특히 전화번호
-  // "010-1234-5678" 같은 13자) 한 줄에 다 안 들어가고 다음 줄로 넘어가 버린다(사용자 리포트:
-  // "전화번호 밑에 숫자가 나오는 경우가 있다", 2026-08-29) - 옆 칸 폭을 뺏어와 넓히면 이 표의
-  // 다른 행(대상물 구분(용도) 등)과 세로선이 안 맞게 될 위험이 있어(표 폭 변경은 안 함), 대신
-  // 값 텍스트에만 적용하는 압축 서식(장평/자간을 줄인 charPr)을 header.xml에 새로 등록해서 쓴다.
-  // 라벨("성명:"/"전화번호:")은 원래 크기 그대로 두고 값만 좁혀서, 칸 폭 안에 한 줄로 들어가게 한다.
-  // 사용자가 지정한 라벨-값 사이 공백("   ")은 그대로 유지 - 글자 간격(자간)만 좁히는 것이지 실제
-  // 공백 문자를 지우는 게 아니다.
-  function registerCompactValueCharPr(headerDoc, baseId) {
-    const charProperties = headerDoc.getElementsByTagNameNS(HH, "charProperties")[0];
-    const allCharPrs = Array.from(charProperties.getElementsByTagNameNS(HH, "charPr"));
-    const base = allCharPrs.find((cp) => cp.getAttribute("id") === baseId);
-    const nextId = allCharPrs.reduce((max, cp) => Math.max(max, parseInt(cp.getAttribute("id"), 10) || 0), 0) + 1;
-
-    const compact = base.cloneNode(true);
-    compact.setAttribute("id", String(nextId));
-    compact.setAttribute("height", "850"); // 8.5pt (라벨은 10pt 그대로)
-    const ratio = compact.getElementsByTagNameNS(HH, "ratio")[0];
-    ["hangul", "latin", "hanja", "japanese", "other", "symbol", "user"].forEach((k) => ratio.setAttribute(k, "88"));
-    const spacing = compact.getElementsByTagNameNS(HH, "spacing")[0];
-    ["hangul", "latin", "hanja", "japanese", "other", "symbol", "user"].forEach((k) => spacing.setAttribute(k, "-8"));
-
-    charProperties.appendChild(compact);
-    charProperties.setAttribute("itemCnt", String(charProperties.getElementsByTagNameNS(HH, "charPr").length));
-    return String(nextId);
+  // "소방안전관리자" 칸의 "전화번호:" 줄은 폭이 좁아(약 35mm) 값이 길면(특히 "010-1234-5678" 같은
+  // 13자) 라벨 뒤에 같은 줄로 이어붙이면 한 줄에 다 안 들어가고 중간에서 줄바꿈돼 버린다(사용자 리포트,
+  // 2026-08-29). 글자 크기를 줄이거나(사용자가 "10pt 돋움체 유지"를 요청) 칸 폭을 넓히면(이 칸은 다른
+  // 여러 행 - 대상물 구분(용도), 이행조치 일자 등 - 과 같은 열 폭을 공유하고 있어 표 전체 세로선이
+  // 어긋날 위험) 둘 다 부작용이 있어서, 대신 라벨 문단 자체는 그대로 두고 값을 라벨 "밑의 새 줄"로
+  // 넣는다 - 원본 폰트/크기 그대로 각 줄이 짧아지므로 줄바꿈 걱정 없이 항상 한 줄에 들어간다.
+  function insertValueAsNewLineAfterLabel(doc, labelText, value, occurrence) {
+    const paras = Array.from(doc.getElementsByTagNameNS(HP, "p"));
+    let count = 0;
+    for (const p of paras) {
+      const text = Array.from(p.getElementsByTagNameNS(HP, "t")).map((t) => t.textContent).join("").trim();
+      if (text === labelText) {
+        if (count === (occurrence || 0)) {
+          const newP = p.cloneNode(true);
+          newP.getElementsByTagNameNS(HP, "t")[0].textContent = value;
+          const origLineseg = p.getElementsByTagNameNS(HP, "lineseg")[0];
+          const newLineseg = newP.getElementsByTagNameNS(HP, "lineseg")[0];
+          if (origLineseg && newLineseg) {
+            newLineseg.setAttribute("vertpos", String(parseInt(origLineseg.getAttribute("vertpos"), 10) + 1600));
+          }
+          p.parentNode.insertBefore(newP, p.nextSibling);
+          return true;
+        }
+        count++;
+      }
+    }
+    return false;
   }
 
   // 표지의 "성명:"/"전화번호:"/"소재지" 같은 라벨 한 줄짜리 문단들(paraPr id=49)이 양쪽정렬(JUSTIFY)로
@@ -165,7 +165,7 @@ const HwpxExport = (() => {
     }
   }
 
-  function fillCoverPage(doc, data, headerDoc) {
+  function fillCoverPage(doc, data) {
     appendValueLineInLabelCell(doc, "대상물 명칭(상호)", data.siteName, 0);
     appendValueLineInLabelCell(doc, "대상물 구분(용도)", data.siteType || "", 0);
     appendValueLineInLabelCell(doc, "업체명(상호)", data.company.name || "", 0);
@@ -181,11 +181,11 @@ const HwpxExport = (() => {
     replaceNthMatchingText(doc, combinedPattern, 0, () => `(성명: ${data.contactName || "-"}    전화번호: ${data.contactPhone || "-"})`);
     replaceNthMatchingText(doc, combinedPattern, 1, () => `(성명: ${data.company.ceo || "-"}    전화번호: ${data.company.phone || "-"})`);
 
-    // 소방안전관리자 성명/전화번호 - 라벨 run 뒤에 값 run 삽입. 칸이 좁아 전화번호가 줄바꿈되지
-    // 않도록 값에는 압축 서식(registerCompactValueCharPr)을 적용한다.
-    const compactCharPrId = headerDoc && registerCompactValueCharPr(headerDoc, "21");
-    insertValueAfterLabelRun(doc, "성명:", data.managerName || "-", 0, compactCharPrId);
-    insertValueAfterLabelRun(doc, "전화번호:", data.managerPhone || "-", 0, compactCharPrId);
+    // 소방안전관리자 성명/전화번호 - "성명:"은 라벨과 같은 줄에 값을 붙이고(이름은 짧아 줄바꿈될
+    // 일이 없음), "전화번호:"는 값을 라벨 밑의 새 줄에 넣는다(10pt 돋움체 그대로 유지하면서 긴
+    // 전화번호도 항상 한 줄에 들어가게 하려고 - 사용자 요청, 2026-08-29).
+    insertValueAfterLabelRun(doc, "성명:", data.managerName || "-", 0);
+    insertValueAsNewLineAfterLabel(doc, "전화번호:", data.managerPhone || "-", 0);
 
     // 이행조치 일자 - 첫 번째 ". . . ~ . . ." 자리만 실제 날짜로 교체
     replaceNthMatchingText(doc, (s) => /^[.\s∼~]+$/.test(s) && s.includes("."), 0, () => data.dateRange || "");
@@ -603,7 +603,7 @@ const HwpxExport = (() => {
     }
 
     fixLabelLineAlignment(headerDoc);
-    fillCoverPage(sectionDoc, { site, company, dateRange, contactName, contactPhone, managerName, managerPhone, siteName, siteType, siteAddr, fireStation }, headerDoc);
+    fillCoverPage(sectionDoc, { site, company, dateRange, contactName, contactPhone, managerName, managerPhone, siteName, siteType, siteAddr, fireStation });
     removeDeficiencyListTable(sectionDoc);
 
     const tbls = Array.from(sectionDoc.getElementsByTagNameNS(HP, "tbl"));
