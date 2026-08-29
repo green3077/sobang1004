@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>소방점검 관리</title>
 <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css">
-<link rel="stylesheet" href="style.css?v=20260828-1659">
+<link rel="stylesheet" href="style.css?v=20260829-1408">
 </head>
 <body>
 <!-- 스크립트 실행 도중 어디선가 예외가 나면 그 뒤의 코드(버튼 연결 등)가 통째로 실행되지
@@ -358,9 +358,9 @@
       <button class="sort-btn" id="btnDefSortByRecent">최신순</button>
     </div>
     <div class="sort-toolbar">
-      <button class="sort-btn" id="btnDefFilterLastMonth">지난달</button>
       <button class="sort-btn" id="btnDefFilterThisMonth">이번달</button>
       <button class="sort-btn" id="btnDefFilterNextMonth">다음달</button>
+      <button class="sort-btn" id="btnDefFilterLastMonth">지난달</button>
     </div>
     <div class="filter-toolbar" id="defFilterToolbar">
       <button type="button" class="filter-chip" data-filter="pending">검토중</button>
@@ -534,6 +534,12 @@
       <button class="btn btn-secondary" id="btnDataRestore" type="button">최근 백업으로 복구</button>
       <p id="backupStatus" class="status-text"></p>
     </div>
+    <div class="card">
+      <h2>🕒 명령어 기록</h2>
+      <div class="hint-text">이 앱을 Claude Code로 수정할 때 사용자가 입력한 명령을 날짜/시간까지 기록해 보여줍니다. Claude Code가 작업할 때마다 직접 기록을 남기는 방식이라(자동 수집 아님), 이 기능이 생긴 시점 이후 명령부터 쌓입니다.</div>
+      <button class="btn btn-secondary" id="btnRefreshCommandLog" type="button">새로고침</button>
+      <div id="commandLogList" class="command-log-list"></div>
+    </div>
     <div class="card" id="authSettingsCard">
       <h2>🔒 로그인 계정</h2>
       <div class="hint-text">이 자료(거래처·점검기록·지적사항·스케줄)는 로그인한 사람 누구나 함께 보고 입력할 수 있는 공용 자료입니다.</div>
@@ -569,15 +575,15 @@
      사진이 이상하게 나온다"는, 이미 고쳐서 배포한 버그를 PC에서만 계속 겪은 원인이었다) - 배포마다
      이 값을 version.js의 APP_VERSION과 함께 갱신해야 한다. -->
 <script src="firebase-config.js"></script>
-<script src="version.js?v=20260828-1659"></script>
-<script src="auth.js?v=20260828-1659"></script>
-<script src="db.js?v=20260828-1659"></script>
-<script src="ui.js?v=20260828-1659"></script>
-<script src="import.js?v=20260828-1659"></script>
-<script src="client-import.js?v=20260828-1659"></script>
-<script src="bldreg.js?v=20260828-1659"></script><script src="ai-fill.js?v=20260828-1659"></script>
-<script src="hwpx-export.js?v=20260828-1659"></script>
-<script src="drive.js?v=20260828-1659"></script>
-<script src="app.js?v=20260828-1659"></script>
+<script src="version.js?v=20260829-1408"></script>
+<script src="auth.js?v=20260829-1408"></script>
+<script src="db.js?v=20260829-1408"></script>
+<script src="ui.js?v=20260829-1408"></script>
+<script src="import.js?v=20260829-1408"></script>
+<script src="client-import.js?v=20260829-1408"></script>
+<script src="bldreg.js?v=20260829-1408"></script><script src="ai-fill.js?v=20260829-1408"></script>
+<script src="hwpx-export.js?v=20260829-1408"></script>
+<script src="drive.js?v=20260829-1408"></script>
+<script src="app.js?v=20260829-1408"></script>
 </body>
 </html>
