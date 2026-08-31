@@ -1,6 +1,6 @@
 {
-  "versionCode": 47,
-  "versionName": "1.46",
+  "versionCode": 48,
+  "versionName": "1.47",
   "apkUrl": "https://green3077.github.io/sobang1004/fire-inspection.apk",
-  "notes": "업데이트 확인 후 '새 버전 다운로드하기'를 누르면 외부 브라우저로 나가지 않고 앱이 바로 APK를 내려받아 설치 화면을 띄웁니다(진행률 표시). 이 버전부터 적용되며, 이번 한 번은 기존 방식대로 받아야 합니다."
+  "notes": "이행완료 보고서 이행조치 일자 시작~종료 선택 UI 추가, 관할119안전센터/관할소방서 인식 개선(지번 주소 대응, 대구 지역 재검증)."
 }
