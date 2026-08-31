@@ -3651,8 +3651,8 @@
   // openExternal 경로)으로 받아야 한다 - 그 이후 버전부터 앱 내 업데이트가 동작한다.
   // version.js의 APP_VERSION은 마지막으로 웹 파일이 바뀐 실제 날짜/시간(한국시간)이고,
   // APP_VERSION_CODE/NAME은 APK를 새로 빌드해서 배포할 때만 올리는 별개의 버전 번호다.
-  const APP_VERSION_CODE = 47;
-  const APP_VERSION_NAME = "1.46";
+  const APP_VERSION_CODE = 48;
+  const APP_VERSION_NAME = "1.47";
   const UPDATE_MANIFEST_URL = "https://green3077.github.io/sobang1004/version.json";
   const IS_NATIVE_UPDATE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
   // 이 프로젝트는 번들러(webpack/vite 등)를 쓰지 않는 순수 스크립트 앱이라 @capacitor/core 전체가
