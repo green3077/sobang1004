@@ -79,9 +79,15 @@ const BldReg = (() => {
     return item;
   }
 
+  // 지번 하나에 표제부가 여러 건 잡히는 경우가 있다 - 주건축물 외에 정화조/창고 같은 소규모
+  // 부속건축물도 별도 항목으로 잡혀서, 무조건 배열 첫 항목(list[0])을 쓰면 부속건축물의 훨씬 작은
+  // 연면적이 뜰 수 있다(사용자 리포트: "경상북도 고령군 대가야읍 낫질로 398"이 연면적 2.4㎡로 나옴 -
+  // 실제로는 부속건축물(정화조 등) 2.4㎡와 주건축물 1420.4㎡ 두 항목이 있었고 부속건축물이 먼저
+  // 반환됨, 2026-09-01). mainAtchGbCd "0"=주건축물, "1"=부속건축물이므로 주건축물을 우선한다.
   async function queryBldRegOp(operation, juso, dataGoKrKey) {
-    const list = await queryBldRegOpList(operation, juso, dataGoKrKey, 5);
-    return list[0] || null;
+    const list = await queryBldRegOpList(operation, juso, dataGoKrKey, 20);
+    if (!list.length) return null;
+    return list.find((it) => it.mainAtchGbCd === "0") || list[0];
   }
 
   // 총괄표제부: 여러 동으로 이루어진 집합건축물(아파트 단지 등)에만 존재 - 없는 게 정상인 경우가 많음.
