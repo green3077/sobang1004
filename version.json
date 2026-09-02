@@ -1,6 +1,6 @@
 {
-  "versionCode": 48,
-  "versionName": "1.47",
+  "versionCode": 49,
+  "versionName": "1.48",
   "apkUrl": "https://green3077.github.io/sobang1004/fire-inspection.apk",
-  "notes": "이행완료 보고서 이행조치 일자 시작~종료 선택 UI 추가, 관할119안전센터/관할소방서 인식 개선(지번 주소 대응, 대구 지역 재검증)."
+  "notes": "이행완료 보고서 지적사항 표에서 층/위치가 굵게 표시되도록 개선. 지적사항 사진 촬영 시 휴대폰 갤러리 저장 여부를 설정에서 켜고 끌 수 있도록 추가(기본 켜짐)."
 }

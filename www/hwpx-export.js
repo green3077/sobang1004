@@ -23,6 +23,11 @@ const HwpxExport = (() => {
     for (const k in attrs) e.setAttribute(k, attrs[k]);
     return e;
   }
+  function hhEl(doc, name, attrs) {
+    const e = doc.createElementNS(HH, name);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
 
   function getTexts(doc) {
     return Array.from(doc.getElementsByTagNameNS(HP, "t"));
@@ -215,6 +220,8 @@ const HwpxExport = (() => {
     p.appendChild(run);
   }
 
+  // lines의 각 항목은 문자열(기본 charPrIDRef로 표시)이거나 { text, charPrIDRef } 객체(그 줄만 다른
+  // 스타일, 예: 굵게)일 수 있다.
   function clearCellAndSetLines(tc, lines, charPrIDRef) {
     const doc = tc.ownerDocument;
     const subList = tc.getElementsByTagNameNS(HP, "subList")[0];
@@ -223,7 +230,8 @@ const HwpxExport = (() => {
     paras.forEach((p) => p.remove());
     lines.forEach((line, i) => {
       const p = templatePara.cloneNode(true);
-      setParagraphText(p, line, charPrIDRef);
+      const isObj = line && typeof line === "object";
+      setParagraphText(p, isObj ? line.text : line, (isObj && line.charPrIDRef) || charPrIDRef);
       subList.appendChild(p);
     });
   }
@@ -519,6 +527,25 @@ const HwpxExport = (() => {
     }
   }
 
+  // "지적사항 내용" 칸의 첫 줄(층/위치, 예: "2F 주 소화전")을 굵게 표시하기 위한 charPr을 header.xml에
+  // 새로 등록한다 - 원본 템플릿에는 굵은 버전이 따로 없어서(id=47은 굵기 없음) baseId의 정의를 그대로
+  // 복제해 <hh:bold/>만 추가한다(사용자 요청, 2026-09-02 - 사진 칸 위 "이행 전"/"이행 후" 라벨처럼
+  // 위치 정보가 눈에 띄도록). hh:bold는 스펙상 hh:offset 다음, hh:underline 앞에 와야 한다(다른 굵은
+  // charPr들의 요소 순서를 참고해 확인함).
+  function buildBoldCharPr(headerDoc, baseId) {
+    const charProperties = headerDoc.getElementsByTagNameNS(HH, "charProperties")[0];
+    const allCharPrs = Array.from(charProperties.getElementsByTagNameNS(HH, "charPr"));
+    const base = allCharPrs.find((cp) => cp.getAttribute("id") === baseId);
+    const newCharPr = base.cloneNode(true);
+    const nextId = allCharPrs.reduce((max, cp) => Math.max(max, parseInt(cp.getAttribute("id"), 10) || 0), 0) + 1;
+    newCharPr.setAttribute("id", String(nextId));
+    const offset = newCharPr.getElementsByTagNameNS(HH, "offset")[0];
+    offset.parentNode.insertBefore(hhEl(headerDoc, "hh:bold", {}), offset.nextSibling);
+    charProperties.appendChild(newCharPr);
+    charProperties.setAttribute("itemCnt", String(charProperties.getElementsByTagNameNS(HH, "charPr").length));
+    return String(nextId);
+  }
+
   async function fillDeficiencyTable(doc, tbl, items, photoMap, imageState, headerDoc) {
     markHeaderRows(tbl, 3);
     const trs = Array.from(tbl.getElementsByTagNameNS(HP, "tr"));
@@ -544,6 +571,9 @@ const HwpxExport = (() => {
       ? buildSingleRowBorderFillIds(headerDoc, firstRowTemplate, lastRowTemplate)
       : null;
 
+    // 지적사항 내용 칸 첫 줄(층/위치)을 굵게 표시하려고 쓸 charPr - 표 전체에서 한 번만 만들어 공유한다.
+    const boldContentCharPrId = headerDoc ? buildBoldCharPr(headerDoc, "47") : "47";
+
     for (let i = 0; i < items.length; i++) {
       const def = items[i];
       const rowTemplate = i === 0 ? firstRowTemplate : (i === items.length - 1 ? lastRowTemplate : middleRowTemplate);
@@ -559,7 +589,8 @@ const HwpxExport = (() => {
         if (addr) addr.setAttribute("rowAddr", String(3 + i));
       });
 
-      const lines = [[def.floor, def.location].filter(Boolean).join(" ") || `${i + 1}번 항목`];
+      const locationText = [def.floor, def.location].filter(Boolean).join(" ") || `${i + 1}번 항목`;
+      const lines = [{ text: locationText, charPrIDRef: boldContentCharPrId }];
       lines.push(def.description || "");
       clearCellAndSetLines(contentTc, lines, "47");
 

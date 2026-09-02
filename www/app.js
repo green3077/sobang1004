@@ -46,6 +46,17 @@
   function callNativePlugin(pluginName, method, options) {
     return window.Capacitor.nativePromise(pluginName, method, options);
   }
+
+  // 지적사항 사진 촬영 시 휴대폰 갤러리에도 저장할지 여부 - 기본은 켜짐(기존 동작 유지), 설정
+  // 화면에서 끌 수 있다("중복 저장/용량 부담" 사용자 요청, 2026-09-02).
+  const PHOTO_SAVE_TO_GALLERY_KEY = "fireinspect_photo_save_to_gallery";
+  function isPhotoSaveToGalleryEnabled() {
+    const v = localStorage.getItem(PHOTO_SAVE_TO_GALLERY_KEY);
+    return v === null ? true : v === "1";
+  }
+  function setPhotoSaveToGalleryEnabled(v) {
+    localStorage.setItem(PHOTO_SAVE_TO_GALLERY_KEY, v ? "1" : "0");
+  }
   function blobToBase64(blob) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -2838,6 +2849,15 @@
       el.addEventListener("change", () => setDeficiencyResolved(el.dataset.def, el.checked));
     });
     $$("#deficienciesList .deficiency-photo-input").forEach((input) => {
+      // 네이티브 앱에서는 OS 파일 선택창(갤러리 저장 여부를 제어할 수 없음) 대신 Camera 플러그인을
+      // 직접 호출한다 - 아래 pickDeficiencyPhotoFiles 주석 참고.
+      input.addEventListener("click", (e) => {
+        if (!isNativeApp()) return;
+        e.preventDefault();
+        pickDeficiencyPhotoFiles().then((files) => {
+          if (files) onDeficiencyPhotoSelected(input.dataset.def, input.dataset.role, files);
+        });
+      });
       input.addEventListener("change", (e) => onDeficiencyPhotoSelected(input.dataset.def, input.dataset.role, e.target.files));
     });
     $$("#deficienciesList .photo-thumb-remove").forEach((btn) => {
@@ -2860,6 +2880,34 @@
     def.resolved = checked;
     await FireDB.updateDeficiency(def.id, { resolved: def.resolved });
     await renderDeficiencies();
+  }
+
+  // 순수 <input type=file>로 카메라를 열면 안드로이드 카메라 앱이 찍은 사진을 항상 휴대폰
+  // 갤러리(DCIM)에도 저장해버려서, 이를 켜고 끌 방법이 없었다(사용자 리포트, 2026-09-02).
+  // @capacitor/camera 플러그인은 saveToGallery 옵션으로 이를 직접 제어할 수 있어서, 네이티브
+  // 앱에서는 파일 입력 대신 이 플러그인을 거쳐 "사진 촬영/갤러리에서 선택" 중 고르게 한다(기존
+  // 안드로이드 파일 선택창과 비슷한 네이티브 바텀시트가 뜬다). 이 프로젝트는 번들러가 없어
+  // @capacitor/camera의 JS SDK(Camera.getPhoto())를 로드할 수 없으므로, 다른 플러그인들처럼
+  // callNativePlugin으로 네이티브 메서드를 직접 호출한다.
+  async function pickDeficiencyPhotoFiles() {
+    try {
+      const result = await callNativePlugin("Camera", "getPhoto", {
+        source: "PROMPT",
+        resultType: "dataUrl",
+        quality: 90,
+        saveToGallery: isPhotoSaveToGalleryEnabled(),
+        promptLabelHeader: "사진 추가",
+        promptLabelPhoto: "갤러리에서 선택",
+        promptLabelPicture: "사진 촬영",
+      });
+      const blob = await (await fetch(result.dataUrl)).blob();
+      return [new File([blob], `photo_${Date.now()}.jpg`, { type: "image/jpeg" })];
+    } catch (e) {
+      if (e && e.message !== "User cancelled photos app") {
+        toast("사진을 가져오지 못했습니다.", "error");
+      }
+      return null;
+    }
   }
 
   async function onDeficiencyPhotoSelected(defId, role, files) {
@@ -3635,6 +3683,7 @@
     $("#dataGoKrApiKey").value = apiKeys.dataGoKrKey || "";
     $("#aiEnabledToggle").checked = AiFill.isEnabled();
     $("#changeHistoryEnabledToggle").checked = isChangeHistoryVisible();
+    $("#photoSaveToGalleryToggle").checked = isPhotoSaveToGalleryEnabled();
     renderDriveStatus();
     $("#authCurrentUser").textContent = Auth.getDisplayName();
   }
@@ -3651,8 +3700,8 @@
   // openExternal 경로)으로 받아야 한다 - 그 이후 버전부터 앱 내 업데이트가 동작한다.
   // version.js의 APP_VERSION은 마지막으로 웹 파일이 바뀐 실제 날짜/시간(한국시간)이고,
   // APP_VERSION_CODE/NAME은 APK를 새로 빌드해서 배포할 때만 올리는 별개의 버전 번호다.
-  const APP_VERSION_CODE = 48;
-  const APP_VERSION_NAME = "1.47";
+  const APP_VERSION_CODE = 49;
+  const APP_VERSION_NAME = "1.48";
   const UPDATE_MANIFEST_URL = "https://green3077.github.io/sobang1004/version.json";
   const IS_NATIVE_UPDATE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
   // 이 프로젝트는 번들러(webpack/vite 등)를 쓰지 않는 순수 스크립트 앱이라 @capacitor/core 전체가
@@ -3747,6 +3796,11 @@
   $("#changeHistoryEnabledToggle").addEventListener("change", (e) => {
     setChangeHistoryVisible(e.target.checked);
     toast(e.target.checked ? "변경이력 보기를 켰습니다." : "변경이력 보기를 껐습니다.");
+  });
+
+  $("#photoSaveToGalleryToggle").addEventListener("change", (e) => {
+    setPhotoSaveToGalleryEnabled(e.target.checked);
+    toast(e.target.checked ? "촬영한 사진을 휴대폰에도 저장합니다." : "촬영한 사진을 휴대폰에는 저장하지 않습니다.");
   });
 
   // ---------- 자료 백업 / 복구 ----------
