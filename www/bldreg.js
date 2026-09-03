@@ -127,11 +127,59 @@ const BldReg = (() => {
     return { grndMin, grndMax, ugrndMin, ugrndMax, structures };
   }
 
+  // 층별개요: 표제부 한 동의 층별 구조/용도/면적 목록. 표제부 연면적(totArea)은 그 동 전체(아파트+상가
+  // 등 혼합 용도) 합계이므로, 동의 주용도(mainPurpsCdNm)에 "아파트"가 섞여 있으면(주상복합) 표제부
+  // 연면적만으로는 상가 부분 면적만 따로 뽑아낼 수 없다 - 층별개요를 층 단위로 조회해 용도별로 가른다.
+  // numOfRows를 넉넉히 잡는 이유: 지번 하나에 동이 여러 개면 이 API가 대지 내 모든 동의 층별 레코드를
+  // 한꺼번에 반환하므로(동 단위 필터 파라미터가 없음), 대단지(동 많고 층 많은 아파트)에서도 목표 동의
+  // 층별 레코드가 잘리지 않도록 한다.
+  async function getFloorOutlineList(juso, dataGoKrKey) {
+    return queryBldRegOpList("getBrFlrOulnInfo", juso, dataGoKrKey, 1000);
+  }
+
+  // 상가 거래처의 연면적에서 아파트(공동주택) 부분을 제외하기 위한 용도 화이트리스트 - 이 목록에 없는
+  // 용도(아파트/공동주택 등 주거용도 포함)는 합산에서 빠진다 (사용자 요청: 거래처가 상가인데 표제부
+  // 연면적에 아파트 면적이 섞여 나오면 안 됨, 2026-09-03). 화이트리스트 방식이라 새 용도명이 나와도
+  // 안전하게 동작(모르는 용도는 자동 제외될 뿐 잘못 포함되지는 않음).
+  const SHOPPING_PURPOSE_KEYWORDS = ["상가", "판매시설", "근린생활시설", "교육연구시설", "의료시설", "운동시설"];
+  function sumShoppingFloorArea(floorItems, dongNm) {
+    let total = 0;
+    const matchedFloors = [];
+    for (const it of floorItems) {
+      if (dongNm && (it.dongNm || "") !== dongNm) continue;
+      const purps = (it.mainPurpsCdNm || "").trim();
+      if (!purps || !SHOPPING_PURPOSE_KEYWORDS.some((kw) => purps.includes(kw))) continue;
+      const area = parseFloat(it.area);
+      if (isNaN(area)) continue;
+      total += area;
+      matchedFloors.push({ flrNoNm: it.flrNoNm || "", purps, area });
+    }
+    return { total, matchedFloors };
+  }
+
+  // 동의 주용도에 "아파트"가 포함된 경우(주상복합 등 - 한 동 안에 상가와 아파트가 섞여 있음)에만
+  // 층별개요로 상가 관련 용도 면적만 다시 합산한다. "아파트"가 없으면(순수 상가 건물 등) 표제부
+  // 연면적(totArea)을 그대로 쓴다 - 불필요한 API 호출과 화이트리스트 누락으로 인한 면적 축소를 피함.
+  // 반환: null이면 override 없음(호출부가 item.totArea 그대로 사용).
+  async function getShoppingAreaOverride(item, juso, dataGoKrKey) {
+    if (!item || !(item.mainPurpsCdNm || "").includes("아파트")) return null;
+    try {
+      const floorItems = await getFloorOutlineList(juso, dataGoKrKey);
+      const { total, matchedFloors } = sumShoppingFloorArea(floorItems, item.dongNm);
+      if (!matchedFloors.length) return null;
+      return { total, matchedFloors };
+    } catch (e) {
+      return null;
+    }
+  }
+
   // 거래처명이 "OO상가1"처럼 "상가" 뒤에 번호가 붙는 경우 - 표제부(대지 내 모든 동)에서 동명칭에
   // "상가"와 그 번호가 함께 들어간 동을 찾아, 그 동 하나의 주용도/연면적/층수를 그대로 가져온다
   // (여러 동을 합산하지 않음 - 사용자 요청). 번호가 포함된 동을 못 찾으면(동명칭에 번호 표기가
   // 없는 경우 등) "상가"만 포함된 동으로 넉넉하게 다시 찾는다.
   // 반환: item이 null이면 "상가"가 들어간 동 자체를 못 찾은 것 - 호출부가 처리.
+  // shoppingArea: 동의 주용도에 아파트가 섞여 있어 층별개요로 상가 관련 용도만 재합산한 경우에만
+  // 값이 있음(null이면 item.totArea를 그대로 쓰면 됨).
   async function lookupShoppingDong(address, number) {
     const keys = getKeys();
     if (!keys.jusoKey || !keys.dataGoKrKey) {
@@ -147,9 +195,12 @@ const BldReg = (() => {
       const numMatched = shoppingDongs.filter((it) => (it.dongNm || "").includes(number));
       if (numMatched.length) matched = numMatched;
     }
+    const item = matched[0] || null;
+    const shoppingArea = await getShoppingAreaOverride(item, juso, keys.dataGoKrKey);
     return {
       juso,
-      item: matched[0] || null,
+      item,
+      shoppingArea,
       dongCandidates: shoppingDongs.map((it) => it.dongNm).filter(Boolean)
     };
   }

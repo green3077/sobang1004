@@ -2020,14 +2020,22 @@
       return;
     }
     const floorInfo = [floorRangeText(item.grndFlrCnt ? parseInt(item.grndFlrCnt, 10) : null, "지상"), floorRangeText(item.ugrndFlrCnt ? parseInt(item.ugrndFlrCnt, 10) : null, "지하")].filter(Boolean).join(" / ");
+    // 동의 주용도에 "아파트"가 섞여 있으면(주상복합) BldReg.lookupShoppingDong이 층별개요에서
+    // 상가·판매시설·근린생활시설·교육연구시설·의료시설·운동시설로 분류된 층만 합산해 shoppingArea로
+    // 돌려준다 - 그 경우 표제부 전체 연면적(item.totArea) 대신 이 값을 쓴다(사용자 요청: 상가
+    // 거래처의 연면적에 아파트 면적이 섞여 나오면 안 됨, 2026-09-03).
+    const shoppingArea = result.shoppingArea;
     const fetched = {
       buildingType: item.mainPurpsCdNm || "",
-      area: item.totArea || "",
+      area: shoppingArea ? String(Math.round(shoppingArea.total * 100) / 100) : (item.totArea || ""),
       floorInfo
     };
     if (fetched.buildingType) $("#siteBuildingType").value = fetched.buildingType;
     if (fetched.area) $("#siteArea").value = fetched.area;
     if (fetched.floorInfo) $("#siteFloorInfo").value = fetched.floorInfo;
+    const areaHint = shoppingArea
+      ? `<div class="hint-text">주용도에 "아파트"가 포함돼 있어(주상복합) 표제부 전체 연면적 대신 상가·판매시설·근린생활시설·교육연구시설·의료시설·운동시설로 분류된 층(${escapeHtml(shoppingArea.matchedFloors.map((f) => f.flrNoNm).filter(Boolean).join(", ") || "-")})의 면적만 합산했습니다. 아파트 면적은 제외됩니다.</div>`
+      : "";
     resultBox.innerHTML = `
       <div class="report-meta-row"><span class="label">대장구분</span><span>표제부 (상가${number ? " " + escapeHtml(number) : ""})</span></div>
       <div class="report-meta-row"><span class="label">동명칭</span><span>${escapeHtml(item.dongNm || "-")}</span></div>
@@ -2035,6 +2043,7 @@
       <div class="report-meta-row"><span class="label">연면적</span><span>${escapeHtml(fetched.area ? fetched.area + " ㎡" : "-")}</span></div>
       <div class="report-meta-row"><span class="label">층수</span><span>${escapeHtml(fetched.floorInfo || "-")}</span></div>
       <div class="hint-text">거래처명의 "상가${number ? number : ""}"와 동명칭이 일치하는 동의 정보를 불러왔습니다. 내용이 다르면 직접 수정해주세요.</div>
+      ${areaHint}
     `;
     toast("표제부에서 해당 상가 동 정보를 불러왔습니다.");
   }
