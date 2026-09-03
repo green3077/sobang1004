@@ -2016,7 +2016,7 @@
     const result = await BldReg.lookupShoppingDong(address, number);
     const item = result.item;
     if (!item) {
-      resultBox.innerHTML = `<div class="bldreg-error">표제부에서 동명칭에 "상가"가 포함된 동을 찾지 못했습니다. 건물명·주소를 확인하거나 직접 입력해주세요.</div>`;
+      resultBox.innerHTML = `<div class="bldreg-error">표제부에서 "상가"가 포함된 동이나 상가·판매시설·근린생활시설 등 상업 용도인 동을 찾지 못했습니다. 건물명·주소를 확인하거나 직접 입력해주세요.</div>`;
       return;
     }
     const floorInfo = [floorRangeText(item.grndFlrCnt ? parseInt(item.grndFlrCnt, 10) : null, "지상"), floorRangeText(item.ugrndFlrCnt ? parseInt(item.ugrndFlrCnt, 10) : null, "지하")].filter(Boolean).join(" / ");
@@ -2036,13 +2036,18 @@
     const areaHint = shoppingArea
       ? `<div class="hint-text">주용도에 "아파트"가 포함돼 있어(주상복합) 표제부 전체 연면적 대신 상가·판매시설·근린생활시설·교육연구시설·의료시설·운동시설로 분류된 층(${escapeHtml(shoppingArea.matchedFloors.map((f) => f.flrNoNm).filter(Boolean).join(", ") || "-")})의 면적만 합산했습니다. 아파트 면적은 제외됩니다.</div>`
       : "";
+    // matchedByPurpose: 동명칭에 "상가"가 없어(예: "301동") 주용도로 찾은 경우 - 이름이 일치해서
+    // 찾았다고 안내하면 사용자가 혼란스러우므로 문구를 다르게 보여준다.
+    const matchHint = result.matchedByPurpose
+      ? `<div class="hint-text">동명칭에 "상가"가 없어 주용도(${escapeHtml(item.mainPurpsCdNm || "-")})로 상업 용도인 동을 찾았습니다. 내용이 다르면 직접 수정해주세요.</div>`
+      : `<div class="hint-text">거래처명의 "상가${number ? number : ""}"와 동명칭이 일치하는 동의 정보를 불러왔습니다. 내용이 다르면 직접 수정해주세요.</div>`;
     resultBox.innerHTML = `
       <div class="report-meta-row"><span class="label">대장구분</span><span>표제부 (상가${number ? " " + escapeHtml(number) : ""})</span></div>
       <div class="report-meta-row"><span class="label">동명칭</span><span>${escapeHtml(item.dongNm || "-")}</span></div>
       <div class="report-meta-row"><span class="label">주용도</span><span>${escapeHtml(fetched.buildingType || "-")}</span></div>
       <div class="report-meta-row"><span class="label">연면적</span><span>${escapeHtml(fetched.area ? fetched.area + " ㎡" : "-")}</span></div>
       <div class="report-meta-row"><span class="label">층수</span><span>${escapeHtml(fetched.floorInfo || "-")}</span></div>
-      <div class="hint-text">거래처명의 "상가${number ? number : ""}"와 동명칭이 일치하는 동의 정보를 불러왔습니다. 내용이 다르면 직접 수정해주세요.</div>
+      ${matchHint}
       ${areaHint}
     `;
     toast("표제부에서 해당 상가 동 정보를 불러왔습니다.");

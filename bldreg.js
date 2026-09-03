@@ -195,12 +195,23 @@ const BldReg = (() => {
       const numMatched = shoppingDongs.filter((it) => (it.dongNm || "").includes(number));
       if (numMatched.length) matched = numMatched;
     }
+    // 아파트 단지의 상가 동은 동명칭이 다른 동과 똑같이 숫자뿐이고("301동") 주용도만 다른 경우가
+    // 흔하다(사용자 리포트: "대구광역시 달서구 진천로 77" 진천역 계룡 리슈빌 - 상가 동명칭이
+    // "301동"이라 이름 매칭으로는 찾지 못했음, 2026-09-03). 동명칭 매칭이 하나도 없으면 주용도
+    // (SHOPPING_PURPOSE_KEYWORDS - 상가/판매시설/근린생활시설 등)로 폴백해서 찾는다. 이 경우
+    // 번호("상가1" 등)는 동명칭 표기 관례를 전제로 하므로 적용하지 않는다.
+    let matchedByPurpose = false;
+    if (!matched.length) {
+      matched = titleList.filter((it) => SHOPPING_PURPOSE_KEYWORDS.some((kw) => (it.mainPurpsCdNm || "").includes(kw)));
+      matchedByPurpose = matched.length > 0;
+    }
     const item = matched[0] || null;
     const shoppingArea = await getShoppingAreaOverride(item, juso, keys.dataGoKrKey);
     return {
       juso,
       item,
       shoppingArea,
+      matchedByPurpose,
       dongCandidates: shoppingDongs.map((it) => it.dongNm).filter(Boolean)
     };
   }
