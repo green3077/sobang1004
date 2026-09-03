@@ -2014,6 +2014,14 @@
     const numMatch = siteName.match(/상가\s*(\d+)/);
     const number = numMatch ? numMatch[1] : null;
     const result = await BldReg.lookupShoppingDong(address, number);
+    // 도로명주소만 입력하면 주소 문자열 자체엔 동 이름이 안 들어있어 관할119안전센터 추정이 실패할 수
+    // 있다(lookupBldRegForCurrentAddress의 일반 경로에 이미 있는 처리인데 "상가" 거래처 경로에는
+    // 빠져 있었음 - 사용자 리포트: "대구광역시 달서구 진천로 77"(계룡리슈빌 상가) 관할119안전센터가
+    // 안 뜬다, 2026-09-03). juso.go.kr이 확인해준 법정동(juso.emdNm)을 붙여서 다시 추정한다 -
+    // 상가 동을 못 찾은 경우(item null)라도 juso 조회 자체는 성공했을 수 있으므로 item 유무와 무관하게 실행.
+    if (result.juso && result.juso.emdNm) {
+      autoSuggestFireStation(`${address} ${result.juso.emdNm}`);
+    }
     const item = result.item;
     if (!item) {
       resultBox.innerHTML = `<div class="bldreg-error">표제부에서 "상가"가 포함된 동이나 상가·판매시설·근린생활시설 등 상업 용도인 동을 찾지 못했습니다. 건물명·주소를 확인하거나 직접 입력해주세요.</div>`;
