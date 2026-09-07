@@ -536,6 +536,9 @@ a.list-card { display: block; text-decoration: none; color: inherit; }
 .attachment-row .list-card-title a { color: var(--accent-dark); word-break: break-all; }
 .attachment-row .btn { width: auto; padding: 8px 16px; font-size: 14px; margin-top: 8px; }
 
+.round-documents-list { max-height: 45vh; overflow-y: auto; margin-bottom: 14px; }
+.round-documents-list:empty { margin-bottom: 0; }
+
 /* 보고서 모아보기 - 카드가 아니라 한 줄짜리 목록(업체명 + 파일명)으로 표시 */
 #reportsHubList {
   background: var(--card-bg);

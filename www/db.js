@@ -5,10 +5,11 @@
 // (공유 저장소로 옮기는 작업은 별도 진행 예정 - 그 전까지는 사진은 올린 사람의 기기에서만 보인다).
 const FireDB = (() => {
   const DB_NAME = "fire-inspection-db";
-  const DB_VERSION = 4;
+  const DB_VERSION = 5;
   const STORES = {
     photos: "photos",
-    attachments: "attachments"
+    attachments: "attachments",
+    roundDocuments: "roundDocuments"
   };
   let dbPromise = null;
 
@@ -35,6 +36,13 @@ const FireDB = (() => {
         if (!db.objectStoreNames.contains(STORES.attachments)) {
           const store = db.createObjectStore(STORES.attachments, { keyPath: "id" });
           store.createIndex("siteId", "siteId", { unique: false });
+        }
+        // 회차(점검 날짜) 관련서류 - 지적사항 자료(deficiencies)와 별개로, 계약서/허가서 등 파일을
+        // 그 방문 회차에 걸어두고 다운로드할 수 있게 한다(사용자 요청, 2026-09-07). attachments와
+        // 같은 이유(용량 큼)로 아직 이 기기에만 저장.
+        if (!db.objectStoreNames.contains(STORES.roundDocuments)) {
+          const store = db.createObjectStore(STORES.roundDocuments, { keyPath: "id" });
+          store.createIndex("roundId", "roundId", { unique: false });
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -293,6 +301,10 @@ const FireDB = (() => {
       for (const def of defs) {
         await api.deleteDeficiency(def.id);
       }
+      const docs = await getAllByIndex(STORES.roundDocuments, "roundId", id);
+      for (const doc of docs) {
+        await remove(STORES.roundDocuments, doc.id);
+      }
       return fbRemove(`deficiencyRounds/${id}`);
     },
     getRound: (id) => fbGet(`deficiencyRounds/${id}`),
@@ -308,6 +320,16 @@ const FireDB = (() => {
       return remove(STORES.attachments, id);
     },
     getAttachmentsBySite: (siteId) => getAllByIndex(STORES.attachments, "siteId", siteId),
+
+    // Round Documents (회차별 관련서류 - 지적사항 자료와 별개, 사진/첨부파일과 같은 이유로 아직 이 기기에만 저장)
+    async addRoundDocument(doc) {
+      const id = doc.id || genId();
+      return put(STORES.roundDocuments, { ...doc, id });
+    },
+    async deleteRoundDocument(id) {
+      return remove(STORES.roundDocuments, id);
+    },
+    getRoundDocumentsByRound: (roundId) => getAllByIndex(STORES.roundDocuments, "roundId", roundId),
 
     // Schedules (스케줄 관리 - 날짜별 방문 예정 업체. id = "YYYY-MM-DD", 점검 기록과 무관한 가벼운 일정)
     getScheduleByDate,

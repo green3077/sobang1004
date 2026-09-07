@@ -3547,6 +3547,76 @@
     toast("지적사항을 모두 삭제했습니다.");
   });
 
+  // ---------- 회차(점검 날짜) 관련서류 - 지적사항 자료와 별개로 계약서/허가서 등 파일을 올려두고
+  // 다운로드할 수 있게 한다(사용자 요청, 2026-09-07). 현장 등록 폼의 "추가 자료" 업로드/다운로드
+  // 방식(attachmentRowHtml/formatFileSize)을 그대로 재사용하고, roundId로 회차별로 구분한다.
+  // 이 모달은 지적사항 화면(사진 썸네일이 activeObjectUrls를 쓰고 있음) 위에 뜨므로, 공용
+  // activeObjectUrls/revokeObjectUrls를 같이 쓰면 모달을 열 때마다 뒤에 깔린 사진들의 URL까지
+  // 지워져 깨져 보인다 - 그래서 이 모달 전용 배열을 따로 둔다.
+  let roundDocumentUrls = [];
+  function revokeRoundDocumentUrls() {
+    roundDocumentUrls.forEach((u) => URL.revokeObjectURL(u));
+    roundDocumentUrls = [];
+  }
+  async function renderRoundDocuments() {
+    revokeRoundDocumentUrls();
+    const list = $("#roundDocumentsList");
+    const docs = await FireDB.getRoundDocumentsByRound(currentRoundId);
+    if (docs.length === 0) {
+      list.innerHTML = `<div class="empty-state">등록된 관련서류가 없습니다.</div>`;
+      return;
+    }
+    list.innerHTML = docs.map((doc) => {
+      const url = URL.createObjectURL(doc.blob);
+      roundDocumentUrls.push(url);
+      return attachmentRowHtml(doc.id, doc.filename, doc.size, url);
+    }).join("");
+    list.querySelectorAll(".btn-delete-attachment").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const ok = await confirmDialog("이 서류를 삭제할까요?");
+        if (!ok) return;
+        await FireDB.deleteRoundDocument(btn.dataset.att);
+        renderRoundDocuments();
+      });
+    });
+  }
+
+  $("#btnOpenRoundDocuments").addEventListener("click", async () => {
+    await renderRoundDocuments();
+    $("#roundDocumentsModal").classList.remove("hidden");
+  });
+  $("#btnCloseRoundDocuments").addEventListener("click", () => {
+    $("#roundDocumentsModal").classList.add("hidden");
+    revokeRoundDocumentUrls();
+  });
+  $("#btnUploadRoundDocument").addEventListener("click", () => $("#roundDocumentInput").click());
+  $("#roundDocumentInput").addEventListener("change", async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (files.length === 0) return;
+    ImportLoading.show("서류를 저장하고 있습니다.");
+    try {
+      let idx = 0;
+      for (const file of files) {
+        idx++;
+        ImportLoading.setProgress((idx / files.length) * 100, files.length > 1 ? `서류를 저장하고 있습니다. (${idx}/${files.length})` : "서류를 저장하고 있습니다.");
+        await FireDB.addRoundDocument({
+          roundId: currentRoundId,
+          siteId: currentDeficiencySiteId,
+          filename: file.name,
+          size: file.size,
+          blob: file,
+          createdAt: new Date().toISOString()
+        });
+        await backupToDrive(currentDeficiencySiteId, "관련서류", file.name, file);
+      }
+    } finally {
+      ImportLoading.hide();
+    }
+    await renderRoundDocuments();
+    toast(`${files.length}개 서류를 등록했습니다.`);
+  });
+
   // 이 회차를 "확인해봤는데 지적사항이 정말 없다"고 표시한다 - 회차 단위 플래그(round.noDeficiency)를
   // 쓰므로, 다른 회차(옛 회차·새 회차)의 표시에는 영향을 주지 않는다. 최신 회차일 때만 지적사항
   // 메인메뉴의 업체 배지에도 곧바로 "지적사항 없음"으로 반영된다(latestRoundCountsBySite가 최신
