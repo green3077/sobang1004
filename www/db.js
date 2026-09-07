@@ -155,6 +155,14 @@ const FireDB = (() => {
     return insp;
   }
 
+  // deficiencyRounds.documents(관련서류 메타데이터 - id/파일명/용량. 실제 파일은 기기별 IndexedDB
+  // roundDocuments에 캐시되고 구글 드라이브에도 백업됨, 2026-09-07)도 같은 이유(Realtime Database는
+  // 빈 배열을 저장하지 않고 키 자체를 지움)로 항상 실제 배열을 보장해줘야 한다.
+  function normalizeRound(round) {
+    if (!round) return null;
+    return { ...round, documents: round.documents || [] };
+  }
+
   // 주의: Firebase Realtime Database는 빈 배열([])을 저장하지 않고 그냥 키 자체를 지워버린다
   // (siteIds가 전부 지워진 날짜를 다시 읽으면 siteIds 필드가 아예 없이 돌아온다) - 그래서
   // 스케줄을 읽을 때마다 normalizeSchedule로 항상 실제 배열을 보장해준다.
@@ -307,9 +315,9 @@ const FireDB = (() => {
       }
       return fbRemove(`deficiencyRounds/${id}`);
     },
-    getRound: (id) => fbGet(`deficiencyRounds/${id}`),
-    getRoundsBySite: async (siteId) => (await fbGetAll("deficiencyRounds")).filter((r) => r.siteId === siteId),
-    getAllRounds: () => fbGetAll("deficiencyRounds"),
+    getRound: async (id) => normalizeRound(await fbGet(`deficiencyRounds/${id}`)),
+    getRoundsBySite: async (siteId) => (await fbGetAll("deficiencyRounds")).filter((r) => r.siteId === siteId).map(normalizeRound),
+    getAllRounds: async () => (await fbGetAll("deficiencyRounds")).map(normalizeRound),
 
     // Attachments (현장에 첨부하는 일반 파일 - 사진과 같은 이유로 아직 이 기기에만 저장)
     async addAttachment(att) {

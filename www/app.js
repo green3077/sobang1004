@@ -3548,8 +3548,14 @@
   });
 
   // ---------- 회차(점검 날짜) 관련서류 - 지적사항 자료와 별개로 계약서/허가서 등 파일을 올려두고
-  // 다운로드할 수 있게 한다(사용자 요청, 2026-09-07). 현장 등록 폼의 "추가 자료" 업로드/다운로드
-  // 방식(attachmentRowHtml/formatFileSize)을 그대로 재사용하고, roundId로 회차별로 구분한다.
+  // 다운로드할 수 있게 한다(사용자 요청, 2026-09-07). 실제 파일은 기기별 IndexedDB(roundDocuments)에
+  // 캐시하면서 업로드 시점에 구글 드라이브에도 백업하고(사용자 요청: "구글드라이브에 저장돠게해줘"),
+  // 어떤 서류가 있는지(id/파일명/용량)는 회차(deficiencyRounds, 공유 Firebase) 안에 documents
+  // 목록으로 같이 저장한다 - 그래야 다른 사람/기기에서 업로드한 서류도 목록에 보이고, 이 기기
+  // 로컬에 없으면 구글 드라이브에서 그 자리에서 채워 넣을 수 있다(사진의 fillMissingPhotosFromDrive와
+  // 같은 방식). 구글 드라이브에는 "<id>_<원래 파일명>"으로 저장해 같은 이름 파일이 여러 개
+  // 올라와도 안 겹치게 한다. 현장 등록 폼의 "추가 자료" 업로드/다운로드 방식
+  // (attachmentRowHtml/formatFileSize)을 그대로 재사용한다.
   // 이 모달은 지적사항 화면(사진 썸네일이 activeObjectUrls를 쓰고 있음) 위에 뜨므로, 공용
   // activeObjectUrls/revokeObjectUrls를 같이 쓰면 모달을 열 때마다 뒤에 깔린 사진들의 URL까지
   // 지워져 깨져 보인다 - 그래서 이 모달 전용 배열을 따로 둔다.
@@ -3558,24 +3564,65 @@
     roundDocumentUrls.forEach((u) => URL.revokeObjectURL(u));
     roundDocumentUrls = [];
   }
+
+  function roundDocumentDriveFilename(entry) {
+    return `${entry.id}_${entry.filename}`;
+  }
+
+  async function fillMissingRoundDocumentsFromDrive(round, docsMap) {
+    const missing = round.documents.filter((d) => !docsMap.has(d.id));
+    if (missing.length === 0) return;
+    const site = await FireDB.getSite(round.siteId);
+    if (!site || !site.name) return;
+    await Promise.all(missing.map(async (d) => {
+      const blob = await DriveBackup.fetchFile(site.name, "관련서류", roundDocumentDriveFilename(d));
+      if (!blob) return;
+      const doc = { id: d.id, roundId: round.id, siteId: round.siteId, filename: d.filename, size: d.size, blob, createdAt: d.createdAt };
+      docsMap.set(d.id, doc);
+      FireDB.addRoundDocument(doc).catch(() => {});
+    }));
+  }
+
   async function renderRoundDocuments() {
     revokeRoundDocumentUrls();
     const list = $("#roundDocumentsList");
-    const docs = await FireDB.getRoundDocumentsByRound(currentRoundId);
-    if (docs.length === 0) {
+    const round = await FireDB.getRound(currentRoundId);
+    const entries = round ? round.documents : [];
+    if (entries.length === 0) {
       list.innerHTML = `<div class="empty-state">등록된 관련서류가 없습니다.</div>`;
       return;
     }
-    list.innerHTML = docs.map((doc) => {
-      const url = URL.createObjectURL(doc.blob);
-      roundDocumentUrls.push(url);
-      return attachmentRowHtml(doc.id, doc.filename, doc.size, url);
+    const localDocs = await FireDB.getRoundDocumentsByRound(currentRoundId);
+    const docsMap = new Map(localDocs.map((d) => [d.id, d]));
+    await fillMissingRoundDocumentsFromDrive(round, docsMap);
+
+    list.innerHTML = entries.map((entry) => {
+      const doc = docsMap.get(entry.id);
+      if (doc && doc.blob) {
+        const url = URL.createObjectURL(doc.blob);
+        roundDocumentUrls.push(url);
+        return attachmentRowHtml(entry.id, entry.filename, entry.size, url);
+      }
+      // 이 기기에도, 구글 드라이브에도 없음(백업이 꺼져 있었거나 네트워크 문제) - 다운로드는
+      // 못하지만 존재는 알 수 있게 남겨두고, 삭제는 계속 가능하게 한다.
+      return `
+        <div class="list-card attachment-row">
+          <div class="list-card-title">${escapeHtml(entry.filename)}</div>
+          <div class="list-card-sub">${formatFileSize(entry.size)} · 이 기기에서 불러올 수 없음</div>
+          <button class="btn btn-danger btn-delete-attachment" data-att="${entry.id}" type="button">삭제</button>
+        </div>
+      `;
     }).join("");
     list.querySelectorAll(".btn-delete-attachment").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const ok = await confirmDialog("이 서류를 삭제할까요?");
         if (!ok) return;
-        await FireDB.deleteRoundDocument(btn.dataset.att);
+        const docId = btn.dataset.att;
+        await FireDB.deleteRoundDocument(docId);
+        const latestRound = await FireDB.getRound(currentRoundId);
+        if (latestRound) {
+          await FireDB.updateRound(currentRoundId, { documents: latestRound.documents.filter((d) => d.id !== docId) });
+        }
         renderRoundDocuments();
       });
     });
@@ -3596,20 +3643,28 @@
     if (files.length === 0) return;
     ImportLoading.show("서류를 저장하고 있습니다.");
     try {
+      const round = await FireDB.getRound(currentRoundId);
+      const newEntries = [];
       let idx = 0;
       for (const file of files) {
         idx++;
         ImportLoading.setProgress((idx / files.length) * 100, files.length > 1 ? `서류를 저장하고 있습니다. (${idx}/${files.length})` : "서류를 저장하고 있습니다.");
+        const id = FireDB.genId();
+        const createdAt = new Date().toISOString();
         await FireDB.addRoundDocument({
+          id,
           roundId: currentRoundId,
           siteId: currentDeficiencySiteId,
           filename: file.name,
           size: file.size,
           blob: file,
-          createdAt: new Date().toISOString()
+          createdAt
         });
-        await backupToDrive(currentDeficiencySiteId, "관련서류", file.name, file);
+        const entry = { id, filename: file.name, size: file.size, createdAt };
+        await backupToDrive(currentDeficiencySiteId, "관련서류", roundDocumentDriveFilename(entry), file);
+        newEntries.push(entry);
       }
+      await FireDB.updateRound(currentRoundId, { documents: [...(round ? round.documents : []), ...newEntries] });
     } finally {
       ImportLoading.hide();
     }
