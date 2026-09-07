@@ -1111,18 +1111,8 @@
       return !!i.scheduledDate && i.scheduledDate <= today;
     });
     relevant.sort((a, b) => (a.scheduledDate || "").localeCompare(b.scheduledDate || ""));
-    const relevantSiteIds = new Set(relevant.map((i) => i.siteId));
-
-    // 스케줄 관리에서 오늘 날짜로 "일정 확정"한 방문도 오늘의 할일에 포함한다(사용자 요청) - 이미
-    // 점검 기록(inspections)으로 오늘 할일에 뜬 거래처는 중복 표시하지 않는다.
-    const confirmedSiteIds = (todaySchedule && todaySchedule.confirmed ? todaySchedule.siteIds : [])
-      .filter((id) => siteMap.has(id) && !relevantSiteIds.has(id));
 
     const list = $("#homeTodoList");
-    if (relevant.length === 0 && confirmedSiteIds.length === 0) {
-      list.innerHTML = `<div class="home-todo-empty">오늘 예정된 할일이 없습니다.</div>`;
-      return;
-    }
     // 같은 거래처가 오늘 할일에 여러 번 뜨지 않게 한다(사용자 요청) - 예를 들어 예전에 밀린
     // 기한초과 건과 오늘 새로 잡힌 건이 같은 거래처에 둘 다 있으면 하나로 합친다. 완료 처리된
     // 게 있으면 그걸 대표로 보여주고(방금 처리한 결과가 눈에 보여야 하므로), 없으면 먼저
@@ -1167,6 +1157,16 @@
       }
     });
     const inspectionItems = Array.from(inspectionItemsBySite.values());
+
+    // 스케줄 관리에서 오늘 날짜로 "일정 확정"한 방문도 오늘의 할일에 포함한다(사용자 요청) - 이미
+    // 위 inspectionItems로 실제 화면에 뜨는 거래처와만 중복을 피한다. 예전에는 "월점검(종합/작동
+    // 대상월이 아님)"이라 화면엔 안 보이는 오래된 예정 기록(relevant 원본 전체)까지 기준으로
+    // 걸러서, 그런 거래처는 오늘 확정한 스케줄 항목까지 같이 사라지는 버그가 있었다(사용자 리포트:
+    // 당일에 확정한 스케줄이 오늘의 할일에 안 보인다, 2026-09-07) - 실제로 표시될 항목
+    // (inspectionItemsBySite)만 기준으로 삼아야 안전하다.
+    const relevantSiteIds = new Set(inspectionItemsBySite.keys());
+    const confirmedSiteIds = (todaySchedule && todaySchedule.confirmed ? todaySchedule.siteIds : [])
+      .filter((id) => siteMap.has(id) && !relevantSiteIds.has(id));
     const scheduleItems = confirmedSiteIds.map((id) => {
       const site = siteMap.get(id);
       // 여기도 마찬가지로 종합/작동점검 대상월이 아니면(월점검) "오늘의 주요 할일"에서 뺀다.
