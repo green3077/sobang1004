@@ -15,15 +15,20 @@
   let sitesSelectedRegion = null; // 지역별 모드에서 드릴다운한 지역 (구/도 이름), null이면 지역 버튼 목록 표시 중
   // "이번달"/"다음달"/"지난달" 필터 - 정렬 방식과 별개로 셋 중 하나만 켤 수 있다(null이면 전체).
   // "거래처 관리"(등록 화면 아래 목록)와 "점검팀"(거래처 목록) 두 화면이 이 상태를 공유한다 -
-  // 같은 거래처 목록을 보여주는 화면이라서. 지적사항 허브(defMonthFilter)와 동일한 규칙.
+  // 같은 거래처 목록을 보여주는 화면이라서. 지적사항 허브/공사팀(defHubState 등)과 동일한 규칙.
   let sitesMonthFilter = null;   // null | "this" | "next" | "last"
-  let defSortMode = "name";      // 지적사항 허브(업체별) 정렬 방식: "name"(가나다순) | "region"(지역별) | "recent"(최신순 - 점검완료일 기준)
-  let defSelectedRegion = null;
-  let defFilters = new Set();    // 지적사항 허브 상태 필터: "pending"|"none"|"open"|"resolved" 중 선택된 것들 (OR 조건)
-  // "이번달"/"다음달"/"지난달" 버튼 - 종합/작동점검월이 그 달에 해당하는 거래처만 보여준다(사용자
-  // 요청). 셋 중 하나만 켤 수 있고(null이면 전체), 켜는 순간 그에 맞는 정렬로 강제 전환한다
-  // (이번달→최신순, 다음달/지난달→가나다순) - 지역별 정렬과는 동시에 쓰지 않는다.
-  let defMonthFilter = null;     // null | "this" | "next" | "last"
+  // 지적사항 허브(업체별)와 공사팀 업체 목록은 정렬/지역/최신순/월 필터/상태 배지까지 화면 구성이
+  // 완전히 같다(사용자 요청, 2026-09-07 - "공사팀 메뉴에서도 지적사항 메뉴랑 똑같이 보여줘") -
+  // 다만 두 화면은 별개 작업이라 상태는 독립적으로 둔다(스케줄 관리 업체선택과 같은 원칙).
+  // sortMode: "name"(가나다순) | "region"(지역별) | "recent"(최신순 - 점검완료일 기준)
+  // monthFilter: null | "this" | "next" | "last" - 켜지면 정렬을 강제 전환한다(이번달→최신순,
+  // 다음달/지난달→가나다순) - 지역별 정렬과는 동시에 쓰지 않는다.
+  // filters: "pending"|"none"|"open"|"resolved" 상태 필터 칩 중 선택된 것들 (OR 조건)
+  function createSiteStatusHubState() {
+    return { sortMode: "name", selectedRegion: null, monthFilter: null, filters: new Set() };
+  }
+  const defHubState = createSiteStatusHubState();
+  const constructionHubState = createSiteStatusHubState();
   let comprehensiveTarget = null; // 현장 등록/수정 폼의 "종합점검대상/해당없음" 토글 상태: true | false | null(미정)
   // 종합점검/작동점검월을 예외적으로 직접 지정한 값 - null이면 자동계산(comprehensiveTarget+사용승인일) 사용,
   // 숫자(1~12)면 저장 시 site.comprehensiveMonthOverride/operationalMonthOverride로 저장되어 항상 우선한다.
@@ -1274,23 +1279,10 @@
   $("#btnBackFromConstructionTeam").addEventListener("click", goHome);
 
   // ---------- 공사팀 (업체 = 거래처 재사용, 견적서/공사내역은 업체별 하위 메뉴) ----------
-  async function renderConstructionTeam() {
-    const sites = await FireDB.getAllSites();
-    sites.sort((a, b) => a.name.localeCompare(b.name, "ko"));
-    const list = $("#constructionTeamList");
-    if (sites.length === 0) {
-      list.innerHTML = `<div class="empty-state">등록된 업체가 없습니다.</div>`;
-      return;
-    }
-    list.innerHTML = sites.map((s) => `
-      <div class="list-card" data-id="${s.id}">
-        <div class="list-card-title">${escapeHtml(s.name)}</div>
-        <div class="list-card-sub">${s.address ? "📍 " + escapeHtml(s.address) : "주소 미입력"}</div>
-      </div>
-    `).join("");
-    Array.from(list.querySelectorAll(".list-card")).forEach((el) => {
-      el.addEventListener("click", () => openConstructionCompany(el.dataset.id));
-    });
+  // 목록 화면 자체(정렬/지역/상태 배지)는 지적사항 허브와 완전히 같아서 renderSiteStatusHub를
+  // 그대로 공유한다(사용자 요청) - 정의는 그 공용 함수와 함께 아래쪽에 있다.
+  function renderConstructionTeam() {
+    return renderSiteStatusHub(constructionHubState, CONSTRUCTION_HUB_IDS, openConstructionCompany);
   }
 
   async function openConstructionCompany(id) {
@@ -1907,6 +1899,14 @@
         delete result.fields.engineerName;
         delete result.fields.engineerPhone;
       }
+      // 담당자/소방안전관리자 성명은 원본 자료에 "이 홍 기"처럼 글자 사이 띄어쓰기가 있어도
+      // 항상 붙여서 저장한다(사용자 요청, 2026-09-07) - 정규식 추출(client-import.js)은 이미
+      // 붙여서 뽑아내지만, AI 추출(ai-fill.js)은 문서에 있는 띄어쓰기를 그대로 돌려줄 수 있어
+      // 여기서 경로에 상관없이 한 번 더 확실히 붙인다.
+      if (result && result.fields) {
+        if (result.fields.contactName) result.fields.contactName = result.fields.contactName.replace(/\s+/g, "");
+        if (result.fields.fireManagerName) result.fields.fireManagerName = result.fields.fireManagerName.replace(/\s+/g, "");
+      }
       {
         const guessName = (result.fields && result.fields.name) || file.name.replace(/\.[^.]+$/, "");
         driveBackupPromise = DriveBackup.uploadToSite(guessName, "거래처_등록자료", file.name, file).catch(() => null);
@@ -2045,7 +2045,9 @@
     const data = {
       name,
       address: $("#siteAddress").value.trim(),
-      contactName: $("#siteContactName").value.trim(),
+      // 담당자/소방안전관리자 성명은 "이 홍 기"처럼 띄어쓰기가 섞여 입력돼도 항상 붙여서
+      // 저장한다(사용자 요청, 2026-09-07).
+      contactName: $("#siteContactName").value.replace(/\s+/g, ""),
       contactPhone: $("#siteContactPhone").value.trim(),
       fireStation: $("#siteFireStation").value.trim(),
       station119: $("#siteStation119").value.trim(),
@@ -2057,7 +2059,7 @@
       floorInfo: $("#siteFloorInfo").value.trim(),
       approvalDate: $("#siteApprovalDate").value.trim(),
       structure: $("#siteStructure").value.trim(),
-      fireManagerName: $("#siteFireManagerName").value.trim(),
+      fireManagerName: $("#siteFireManagerName").value.replace(/\s+/g, ""),
       fireManagerPhone: $("#siteFireManagerPhone").value.trim(),
       fireManagerAppointDate: $("#siteFireManagerAppointDate").value.trim(),
       fireManagerEduDate: $("#siteFireManagerEduDate").value.trim(),
@@ -2857,7 +2859,7 @@
     return { label: "검토중", cls: "badge-pending" };
   }
 
-  function deficiencyHubCardHtml(s, c) {
+  function siteStatusHubCardHtml(s, c) {
     // 업체 배지는 미해결/해결을 같이 보여주지 않고 최신 회차 기준 단일 상태 하나만 보여준다
     // (사용자 요청) - 미해결이 하나라도 있으면 그게 우선.
     const status = roundStatusBadge({ noDeficiency: c.noDeficiency }, c.open, c.resolved);
@@ -2880,10 +2882,10 @@
     `;
   }
 
-  function bindDeficiencyHubCardClicks(container) {
+  function bindSiteStatusHubCardClicks(container, onCardClick, rerender) {
     Array.from(container.querySelectorAll(".list-card")).forEach((el) => {
       const id = el.dataset.site;
-      el.addEventListener("click", () => openSiteRounds(id));
+      el.addEventListener("click", () => onCardClick(id));
       const menuBtn = el.querySelector("[data-menu-btn]");
       const menu = el.querySelector("[data-menu]");
       menuBtn.addEventListener("click", (e) => {
@@ -2902,23 +2904,23 @@
         const ok = await confirmDialog("거래처를 삭제 하시겠습니까?");
         if (!ok) return;
         await FireDB.deleteSite(id);
-        renderDeficiencyHub();
+        rerender();
       });
     });
   }
 
-  function renderDeficiencyHubByRegion(sites, countsBySite) {
-    const list = $("#deficiencyHubList");
-    if (defSelectedRegion) {
-      const inRegion = sites.filter((s) => classifyRegion(s.address) === defSelectedRegion);
-      const backBtnHtml = `<button class="btn btn-secondary region-back-row" id="btnDefBackToRegionList">← 지역 목록으로 (${escapeHtml(defSelectedRegion)})</button>`;
+  function renderSiteStatusHubByRegion(sites, countsBySite, state, ids, onCardClick, rerender) {
+    const list = $("#" + ids.list);
+    if (state.selectedRegion) {
+      const inRegion = sites.filter((s) => classifyRegion(s.address) === state.selectedRegion);
+      const backBtnHtml = `<button class="btn btn-secondary region-back-row" type="button">← 지역 목록으로 (${escapeHtml(state.selectedRegion)})</button>`;
       if (inRegion.length === 0) {
         list.innerHTML = `${backBtnHtml}<div class="empty-state">이 지역에 해당하는 거래처가 없습니다.</div>`;
       } else {
-        list.innerHTML = backBtnHtml + inRegion.map((s) => deficiencyHubCardHtml(s, countsBySite.get(s.id) || { open: 0, resolved: 0 })).join("");
-        bindDeficiencyHubCardClicks(list);
+        list.innerHTML = backBtnHtml + inRegion.map((s) => siteStatusHubCardHtml(s, countsBySite.get(s.id) || { open: 0, resolved: 0 })).join("");
+        bindSiteStatusHubCardClicks(list, onCardClick, rerender);
       }
-      $("#btnDefBackToRegionList").addEventListener("click", () => { defSelectedRegion = null; renderDeficiencyHub(); });
+      list.querySelector(".region-back-row").addEventListener("click", () => { state.selectedRegion = null; rerender(); });
       return;
     }
     const counts = new Map();
@@ -2935,7 +2937,7 @@
       </button>
     `).join("")}</div>`;
     Array.from(list.querySelectorAll(".region-btn")).forEach((btn) => {
-      btn.addEventListener("click", () => { defSelectedRegion = btn.dataset.region; renderDeficiencyHub(); });
+      btn.addEventListener("click", () => { state.selectedRegion = btn.dataset.region; rerender(); });
     });
   }
 
@@ -2977,33 +2979,37 @@
     return countsBySite;
   }
 
-  async function renderDeficiencyHub() {
-    $("#btnDefSortByName").classList.toggle("active", defSortMode === "name" && !defMonthFilter);
-    $("#btnDefSortByRegion").classList.toggle("active", defSortMode === "region" && !defMonthFilter);
-    $("#btnDefSortByRecent").classList.toggle("active", defSortMode === "recent" && !defMonthFilter);
-    $("#btnDefFilterThisMonth").classList.toggle("active", defMonthFilter === "this");
-    $("#btnDefFilterNextMonth").classList.toggle("active", defMonthFilter === "next");
-    $("#btnDefFilterLastMonth").classList.toggle("active", defMonthFilter === "last");
+  // 지적사항 허브와 공사팀 업체 목록이 공유하는 렌더러 - state/ids/onCardClick만 다르게 넘기면
+  // 정렬(가나다순/지역별/최신순)·월 필터(이번달/다음달/지난달)·상태 필터 칩·업체 배지까지
+  // 완전히 같은 화면을 그린다(사용자 요청, 2026-09-07).
+  async function renderSiteStatusHub(state, ids, onCardClick) {
+    const rerender = () => renderSiteStatusHub(state, ids, onCardClick);
+    $("#" + ids.sortName).classList.toggle("active", state.sortMode === "name" && !state.monthFilter);
+    $("#" + ids.sortRegion).classList.toggle("active", state.sortMode === "region" && !state.monthFilter);
+    $("#" + ids.sortRecent).classList.toggle("active", state.sortMode === "recent" && !state.monthFilter);
+    $("#" + ids.filterThisMonth).classList.toggle("active", state.monthFilter === "this");
+    $("#" + ids.filterNextMonth).classList.toggle("active", state.monthFilter === "next");
+    $("#" + ids.filterLastMonth).classList.toggle("active", state.monthFilter === "last");
 
     const [sites, defs, rounds] = await Promise.all([FireDB.getAllSites(), FireDB.getAllDeficiencies(), FireDB.getAllRounds()]);
     sites.sort((a, b) => a.name.localeCompare(b.name, "ko"));
     const countsBySite = latestRoundCountsBySite(sites, defs, rounds);
-    const list = $("#deficiencyHubList");
+    const list = $("#" + ids.list);
     if (sites.length === 0) {
       list.innerHTML = `<div class="empty-state">등록된 현장이 없습니다.</div>`;
       return;
     }
 
-    let filtered = defFilters.size === 0
+    let filtered = state.filters.size === 0
       ? sites
       : sites.filter((s) => {
         const c = countsBySite.get(s.id) || { open: 0, resolved: 0 };
-        return deficiencySiteStatuses(c, s).some((st) => defFilters.has(st));
+        return deficiencySiteStatuses(c, s).some((st) => state.filters.has(st));
       });
 
     // "이번달"/"다음달"/"지난달"은 종합/작동점검월이 그 달에 해당하는 거래처만 남긴다(사용자 요청).
-    if (defMonthFilter) {
-      const month = targetMonthFor(defMonthFilter);
+    if (state.monthFilter) {
+      const month = targetMonthFor(state.monthFilter);
       filtered = filtered.filter((s) => isSiteInMonth(s, month));
     }
 
@@ -3013,7 +3019,7 @@
     }
 
     // 월 필터가 켜져 있으면 그에 맞는 정렬을 강제한다(사용자 요청) - 이번달→최신순, 다음달/지난달→가나다순.
-    const effectiveSortMode = !defMonthFilter ? defSortMode : (defMonthFilter === "this" ? "recent" : "name");
+    const effectiveSortMode = !state.monthFilter ? state.sortMode : (state.monthFilter === "this" ? "recent" : "name");
 
     if (effectiveSortMode === "recent") {
       // 점검완료일(최근 회차 날짜) 기준 최신순 - 날짜가 없는 거래처는 맨 뒤로 보낸다.
@@ -3025,50 +3031,70 @@
     }
 
     if (effectiveSortMode === "region") {
-      renderDeficiencyHubByRegion(filtered, countsBySite);
+      renderSiteStatusHubByRegion(filtered, countsBySite, state, ids, onCardClick, rerender);
       return;
     }
-    list.innerHTML = filtered.map((s) => deficiencyHubCardHtml(s, countsBySite.get(s.id) || { open: 0, resolved: 0 })).join("");
-    bindDeficiencyHubCardClicks(list);
+    list.innerHTML = filtered.map((s) => siteStatusHubCardHtml(s, countsBySite.get(s.id) || { open: 0, resolved: 0 })).join("");
+    bindSiteStatusHubCardClicks(list, onCardClick, rerender);
   }
 
-  $("#btnDefSortByName").addEventListener("click", () => {
-    defSortMode = "name";
-    defSelectedRegion = null;
-    defMonthFilter = null;
-    renderDeficiencyHub();
-  });
-  $("#btnDefSortByRegion").addEventListener("click", () => {
-    defSortMode = "region";
-    defMonthFilter = null;
-    renderDeficiencyHub();
-  });
-  $("#btnDefSortByRecent").addEventListener("click", () => {
-    defSortMode = "recent";
-    defSelectedRegion = null;
-    defMonthFilter = null;
-    renderDeficiencyHub();
-  });
-  // "이번달"/"다음달"/"지난달"은 서로 배타적인 토글 버튼 - 켜져 있는 걸 다시 누르면 꺼진다(전체 보기로 복귀).
-  function wireDefMonthButton(id, key) {
-    $("#" + id).addEventListener("click", () => {
-      defMonthFilter = defMonthFilter === key ? null : key;
-      defSelectedRegion = null;
-      renderDeficiencyHub();
+  function wireSiteStatusHubToolbar(state, ids, onCardClick) {
+    const rerender = () => renderSiteStatusHub(state, ids, onCardClick);
+    $("#" + ids.sortName).addEventListener("click", () => {
+      state.sortMode = "name";
+      state.selectedRegion = null;
+      state.monthFilter = null;
+      rerender();
+    });
+    $("#" + ids.sortRegion).addEventListener("click", () => {
+      state.sortMode = "region";
+      state.monthFilter = null;
+      rerender();
+    });
+    $("#" + ids.sortRecent).addEventListener("click", () => {
+      state.sortMode = "recent";
+      state.selectedRegion = null;
+      state.monthFilter = null;
+      rerender();
+    });
+    // "이번달"/"다음달"/"지난달"은 서로 배타적인 토글 버튼 - 켜져 있는 걸 다시 누르면 꺼진다(전체 보기로 복귀).
+    function wireMonthButton(id, key) {
+      $("#" + id).addEventListener("click", () => {
+        state.monthFilter = state.monthFilter === key ? null : key;
+        state.selectedRegion = null;
+        rerender();
+      });
+    }
+    wireMonthButton(ids.filterThisMonth, "this");
+    wireMonthButton(ids.filterNextMonth, "next");
+    wireMonthButton(ids.filterLastMonth, "last");
+    $$("#" + ids.filterToolbar + " .filter-chip").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const key = btn.dataset.filter;
+        if (state.filters.has(key)) { state.filters.delete(key); btn.classList.remove("active"); }
+        else { state.filters.add(key); btn.classList.add("active"); }
+        state.selectedRegion = null;
+        rerender();
+      });
     });
   }
-  wireDefMonthButton("btnDefFilterThisMonth", "this");
-  wireDefMonthButton("btnDefFilterNextMonth", "next");
-  wireDefMonthButton("btnDefFilterLastMonth", "last");
-  $$("#defFilterToolbar .filter-chip").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const key = btn.dataset.filter;
-      if (defFilters.has(key)) { defFilters.delete(key); btn.classList.remove("active"); }
-      else { defFilters.add(key); btn.classList.add("active"); }
-      defSelectedRegion = null;
-      renderDeficiencyHub();
-    });
-  });
+
+  const DEF_HUB_IDS = {
+    list: "deficiencyHubList", filterToolbar: "defFilterToolbar",
+    sortName: "btnDefSortByName", sortRegion: "btnDefSortByRegion", sortRecent: "btnDefSortByRecent",
+    filterThisMonth: "btnDefFilterThisMonth", filterNextMonth: "btnDefFilterNextMonth", filterLastMonth: "btnDefFilterLastMonth"
+  };
+  const CONSTRUCTION_HUB_IDS = {
+    list: "constructionTeamList", filterToolbar: "constructionTeamFilterToolbar",
+    sortName: "btnConstructionSortByName", sortRegion: "btnConstructionSortByRegion", sortRecent: "btnConstructionSortByRecent",
+    filterThisMonth: "btnConstructionFilterThisMonth", filterNextMonth: "btnConstructionFilterNextMonth", filterLastMonth: "btnConstructionFilterLastMonth"
+  };
+
+  function renderDeficiencyHub() {
+    return renderSiteStatusHub(defHubState, DEF_HUB_IDS, openSiteRounds);
+  }
+  wireSiteStatusHubToolbar(defHubState, DEF_HUB_IDS, openSiteRounds);
+  wireSiteStatusHubToolbar(constructionHubState, CONSTRUCTION_HUB_IDS, openConstructionCompany);
 
   // 회차 도입 전(2026-08-22 이전)에 만들어진 지적사항은 roundId가 아예 없다 - 그런 현장을 처음
   // 열 때 딱 한 번, 그 기존 지적사항 전체를 회차 하나로 묶어준다(가장 이른 생성일을 회차 날짜로
