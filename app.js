@@ -314,21 +314,38 @@
     [/^경상남|^경남/, "경남"],
     [/^제주/, "제주"]
   ];
+  // 시/군/구 단위 이름만으로는(예: "영천시") 어느 광역시·도 소속인지 헷갈린다(사용자 요청,
+  // 2026-09-07) - 그래서 항상 앞에 광역시/도 이름(도는 "경북"처럼 축약형)을 붙인다. 시/군/구
+  // 이름은 주소 토큰 중 "시/군/구"로 끝나는 첫 토큰을 쓴다 - 광역시는 그 아래 구/군(예: "달서구"),
+  // 도는 그 아래 시/군(예: "영천시")이 이 규칙 하나로 뽑힌다. "특별시"/"광역시"/"특별자치시"/
+  // "특별자치도" 자체와, PROVINCE_PATTERNS의 시/도 이름 자체("대구"는 우연히 "구"로 끝나 이
+  // 규칙에 잘못 걸릴 수 있어 별도 제외)는 후보에서 뺀다.
+  const PROVINCE_LABELS = PROVINCE_PATTERNS.map(([, label]) => label);
+  function extractDistrictToken(addr) {
+    const tokens = addr.split(/\s+/);
+    for (const raw of tokens) {
+      const t = raw.replace(/[^가-힣]/g, "");
+      if (!t || PROVINCE_LABELS.includes(t)) continue;
+      // {1,}(2글자 이상 전체) - "중구"/"동구"처럼 한 글자 이름 뒤에 "구"만 붙는 구도 있어(서울/부산/
+      // 대구/인천/광주/대전/울산에 흔함) {2,}(3글자 이상)로 하면 이런 구들이 빠진다.
+      if (/^[가-힣]{1,}(시|군|구)$/.test(t) && !/(특별시|광역시|특별자치시|특별자치도)$/.test(t)) {
+        return t;
+      }
+    }
+    return null;
+  }
   function classifyRegion(address) {
     const addr = (address || "").trim();
     if (!addr) return "지역 미상";
     for (const [re, label] of PROVINCE_PATTERNS) {
       if (!re.test(addr)) continue;
-      if (label === "대구") {
-        const gu = DAEGU_DISTRICTS.find((g) => addr.includes(g));
-        return gu || "대구 기타";
-      }
-      return label;
+      const district = extractDistrictToken(addr);
+      return district ? `${label} ${district}` : `${label} 기타`;
     }
     return "지역 미상";
   }
-  // 요약줄의 "N개 지역" 개수용 - 버튼 그리드는 대구를 구/군까지 쪼개서 보여주지만,
-  // 이 개수는 광역시/도 단위로만 세어 대구의 여러 구가 지역 개수를 부풀리지 않게 한다.
+  // 요약줄의 "N개 지역" 개수용 - 버튼 그리드는 시/군/구 단위까지 쪼개서 보여주지만,
+  // 이 개수는 광역시/도 단위로만 세어 한 광역시/도의 여러 구/시가 지역 개수를 부풀리지 않게 한다.
   function classifyBroadRegion(address) {
     const addr = (address || "").trim();
     if (!addr) return "지역 미상";
@@ -336,6 +353,27 @@
       if (re.test(addr)) return label;
     }
     return "지역 미상";
+  }
+
+  // "대구 달서구"/"부산 중구"/"경북 영천시" 같은 지역 라벨(classifyRegion 결과)들을 화면에
+  // 나열할 순서 - PROVINCE_PATTERNS 선언 순서(대구→서울→부산→...)로 묶고, 묶음 안에서는
+  // 가나다순, "OO 기타"(시/군/구를 못 뽑아낸 주소)는 그 묶음 맨 뒤, "지역 미상"은 전체 맨
+  // 뒤에 둔다. 거래처 목록/지적사항 허브/스케줄 관리 업체선택, 지역별 정렬을 쓰는 화면
+  // 셋이 이 함수 하나를 공유한다.
+  function orderRegionLabels(counts) {
+    const ordered = [];
+    PROVINCE_LABELS.forEach((label) => {
+      const inGroup = Array.from(counts.keys()).filter((r) => r.startsWith(label + " "));
+      inGroup.sort((a, b) => {
+        const aEtc = a === `${label} 기타`;
+        const bEtc = b === `${label} 기타`;
+        if (aEtc !== bEtc) return aEtc ? 1 : -1;
+        return a.localeCompare(b, "ko");
+      });
+      ordered.push(...inGroup);
+    });
+    if (counts.has("지역 미상")) ordered.push("지역 미상");
+    return ordered;
   }
 
   // 이행완료 보고서의 "○○ 소방본부장ㆍ소방서장 귀하"를 실제 관할소방서 이름으로 채우기 위한 최선 추정.
@@ -1396,7 +1434,7 @@
         ${inspectionScheduleBadgeHtml(s) ? `<div class="list-card-sub">${inspectionScheduleBadgeHtml(s)}</div>` : ""}
         <div class="list-card-sub">${s.address ? "📍 " + escapeHtml(s.address) : "주소 미입력"}</div>
         ${s.contactName ? `<div class="list-card-sub">담당자: ${escapeHtml(s.contactName)}</div>` : ""}
-        <div class="list-card-sub">${last ? `마지막 점검일: ${escapeHtml(last.completedDate || last.scheduledDate)} · 점검자: ${escapeHtml(last.inspector || "-")}` : "점검 이력 없음"}</div>
+        <div class="list-card-sub">${last ? `마지막 점검일: ${escapeHtml(last.completedDate || last.scheduledDate)}` : "점검 이력 없음"}</div>
         <div class="list-card-sub site-card-phone-row">
           <span>${s.contactPhone ? "📞 " + escapeHtml(formatPhone(s.contactPhone)) : "연락처 미입력"}</span>
           ${s.contactPhone ? `<a class="btn-call" href="tel:${escapeHtml(s.contactPhone)}">전화걸기</a>` : ""}
@@ -1471,11 +1509,7 @@
       const region = classifyRegion(s.address);
       counts.set(region, (counts.get(region) || 0) + 1);
     });
-    const daeguOrder = DAEGU_DISTRICTS.filter((g) => counts.has(g));
-    const otherOrder = PROVINCE_PATTERNS.map(([, label]) => label).filter((l) => l !== "대구" && counts.has(l));
-    const orderedRegions = [...daeguOrder, ...otherOrder];
-    if (counts.has("대구 기타")) orderedRegions.push("대구 기타");
-    if (counts.has("지역 미상")) orderedRegions.push("지역 미상");
+    const orderedRegions = orderRegionLabels(counts);
 
     list.innerHTML = `<div class="region-grid">${orderedRegions.map((r) => `
       <button class="region-btn" data-region="${escapeHtml(r)}">
@@ -1582,7 +1616,6 @@
       siteId,
       type: inspectionTypeForMonth(site, dateStr),
       scheduledDate: dateStr,
-      inspector: "",
       status: "scheduled",
       completedDate: null,
       createdAt: new Date().toISOString()
@@ -2380,7 +2413,7 @@
           <button type="button" data-menu-edit>수정하기</button>
           <button type="button" class="danger" data-menu-delete>삭제</button>
         </div>
-        <div class="list-card-sub">${escapeHtml(typeLabel)}${insp.inspector ? " · 점검자: " + escapeHtml(insp.inspector) : ""}</div>
+        <div class="list-card-sub">${escapeHtml(typeLabel)}</div>
       </div>
     `;
   }
@@ -2834,11 +2867,7 @@
       const region = classifyRegion(s.address);
       counts.set(region, (counts.get(region) || 0) + 1);
     });
-    const daeguOrder = DAEGU_DISTRICTS.filter((g) => counts.has(g));
-    const otherOrder = PROVINCE_PATTERNS.map(([, label]) => label).filter((l) => l !== "대구" && counts.has(l));
-    const orderedRegions = [...daeguOrder, ...otherOrder];
-    if (counts.has("대구 기타")) orderedRegions.push("대구 기타");
-    if (counts.has("지역 미상")) orderedRegions.push("지역 미상");
+    const orderedRegions = orderRegionLabels(counts);
 
     list.innerHTML = `<div class="region-grid">${orderedRegions.map((r) => `
       <button class="region-btn" data-region="${escapeHtml(r)}">
@@ -4541,11 +4570,7 @@
         const region = classifyRegion(s.address);
         counts.set(region, (counts.get(region) || 0) + 1);
       });
-      const daeguOrder = DAEGU_DISTRICTS.filter((g) => counts.has(g));
-      const otherOrder = PROVINCE_PATTERNS.map(([, label]) => label).filter((l) => l !== "대구" && counts.has(l));
-      const orderedRegions = [...daeguOrder, ...otherOrder];
-      if (counts.has("대구 기타")) orderedRegions.push("대구 기타");
-      if (counts.has("지역 미상")) orderedRegions.push("지역 미상");
+      const orderedRegions = orderRegionLabels(counts);
       list.innerHTML = `<div class="region-grid">${orderedRegions.map((r) => `
         <button class="region-btn" data-region="${escapeHtml(r)}" type="button">
           <span class="region-btn-name">${escapeHtml(r)}</span>
