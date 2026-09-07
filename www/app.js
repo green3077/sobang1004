@@ -2,6 +2,10 @@
 (() => {
   let editingSiteId = null;
   let currentSiteId = null;      // 현장 상세 화면에서 보고 있는 현장
+  // 현장 상세를 "거래처 관리"("entry")에서 열었는지 "점검팀"("sites")에서 열었는지 - 점검팀에서
+  // 열었을 때만 날짜/점검하기 버튼을 보여준다(사용자 요청). 상세 화면 안에서 다시 그리는 경우
+  // (점검 수정/삭제, 점검 상세에서 뒤로가기 등)는 origin을 안 넘겨 기존 값을 그대로 유지한다.
+  let currentSiteDetailOrigin = "sites";
   let currentInspectionId = null; // 점검 상세/사진 갤러리 화면에서 보고 있는 점검 회차(날짜)
   let selectedInspectionDate = null; // 거래처 상세의 "점검하기" 버튼이 사용할 날짜 - 기본 오늘, 사용자가 수정 가능
   let currentConstructionSiteId = null;  // 공사팀에서 보고 있는 업체(=현장)
@@ -883,6 +887,13 @@
         return `${t.replace(/(시|군)$/, "")}소방서`;
       }
     }
+    // 위 정규식은 "시"/"군" 접미사가 붙어 있어야만 잡는다 - 그런데 실제로는 접미사를 생략하고
+    // "경북 영천 OO동"처럼 지역명만 적는 경우가 있다(사용자 리포트: 경북 영천 주소에서 관할119안전센터가
+    // 안 채워지는 곳이 있다, 2026-09-07). 경북 시/군 이름은 흔한 일반 단어와 겹치지 않아 접미사 없이
+    // 이름만으로 판단해도 안전하므로, GYEONGBUK_119_CENTERS의 소방서 키(예: "영천소방서")에서
+    // "소방서"를 뗀 이름이 주소에 포함돼 있으면 그 소방서로 본다(마지막 폴백).
+    const gbStation = Object.keys(GYEONGBUK_119_CENTERS).find((k) => addr.includes(k.replace(/소방서$/, "")));
+    if (gbStation) return gbStation;
     return "";
   }
 
@@ -1135,7 +1146,7 @@
     });
     list.innerHTML = items.map((it) => it.html).join("");
     $$("#homeTodoList .home-todo-item").forEach((el) => {
-      el.addEventListener("click", () => openSiteDetail(el.dataset.siteId));
+      el.addEventListener("click", () => openSiteDetail(el.dataset.siteId, "sites"));
       const callBtn = el.querySelector(".btn-call");
       if (callBtn) callBtn.addEventListener("click", (e) => e.stopPropagation());
     });
@@ -1401,10 +1412,10 @@
     openSiteCardMenu = null;
   }
   document.addEventListener("click", closeSiteCardMenu);
-  function bindSiteCardClicks(container) {
+  function bindSiteCardClicks(container, origin) {
     Array.from(container.querySelectorAll(".list-card")).forEach((el) => {
       const id = el.dataset.id;
-      el.addEventListener("click", () => openSiteDetail(id));
+      el.addEventListener("click", () => openSiteDetail(id, origin));
       const callBtn = el.querySelector(".btn-call");
       if (callBtn) callBtn.addEventListener("click", (e) => e.stopPropagation());
       const menuBtn = el.querySelector("[data-menu-btn]");
@@ -1429,18 +1440,18 @@
       });
     });
   }
-  function renderSiteCardsInto(list, sitesArr, lastBySite, emptyMessage) {
+  function renderSiteCardsInto(list, sitesArr, lastBySite, emptyMessage, origin) {
     if (sitesArr.length === 0) {
       list.innerHTML = `<div class="empty-state">${emptyMessage}</div>`;
       return;
     }
     list.innerHTML = sitesArr.map((s) => siteCardHtml(s, lastBySite)).join("");
-    bindSiteCardClicks(list);
+    bindSiteCardClicks(list, origin);
   }
 
   // list/rerender를 인자로 받아서 "거래처 관리"(entrySitesList)와 "점검팀"(sitesList) 두 화면이
   // 정렬 상태(sitesSortMode/sitesSelectedRegion)를 공유하면서도 각자의 DOM에 그릴 수 있게 한다.
-  function renderSitesByRegion(sites, lastBySite, list, rerender) {
+  function renderSitesByRegion(sites, lastBySite, list, rerender, origin) {
     if (sitesSelectedRegion) {
       const filtered = sites.filter((s) => classifyRegion(s.address) === sitesSelectedRegion);
       const backBtnHtml = `<button class="btn btn-secondary region-back-row" type="button">← 지역 목록으로 (${escapeHtml(sitesSelectedRegion)})</button>`;
@@ -1448,7 +1459,7 @@
         list.innerHTML = `${backBtnHtml}<div class="empty-state">이 지역에 등록된 현장이 없습니다.</div>`;
       } else {
         list.innerHTML = backBtnHtml + filtered.map((s) => siteCardHtml(s, lastBySite)).join("");
-        bindSiteCardClicks(list);
+        bindSiteCardClicks(list, origin);
       }
       list.querySelector(".region-back-row").addEventListener("click", () => { sitesSelectedRegion = null; rerender(); });
       return;
@@ -1506,6 +1517,8 @@
     const list = $("#" + listElId);
     const summary = $("#" + summaryElId);
     const rerender = () => renderSiteListInto(listElId, summaryElId, toolbarIds);
+    // "거래처 관리" 목록(entrySitesList)에서 연 현장 상세는 날짜/점검하기 버튼을 숨긴다(사용자 요청).
+    const origin = listElId === "entrySitesList" ? "entry" : "sites";
     if (sites.length === 0) {
       summary.textContent = "";
       list.innerHTML = sitesMonthOnly
@@ -1522,11 +1535,11 @@
         const regionCount = new Set(sites.map((s) => classifyBroadRegion(s.address))).size;
         summary.innerHTML = `전체 <strong>${sites.length}개</strong> 거래처 · ${regionCount}개 지역`;
       }
-      renderSitesByRegion(sites, lastBySite, list, rerender);
+      renderSitesByRegion(sites, lastBySite, list, rerender, origin);
       return;
     }
     summary.innerHTML = `전체 <strong>${sites.length}개</strong> 거래처`;
-    renderSiteCardsInto(list, sites, lastBySite, "등록된 현장이 없습니다.");
+    renderSiteCardsInto(list, sites, lastBySite, "등록된 현장이 없습니다.", origin);
   }
 
   const SITES_TOOLBAR_IDS = { name: "btnSortByName", region: "btnSortByRegion", month: "btnFilterThisMonth" };
@@ -1983,7 +1996,7 @@
       await saveSiteAttachments(existing.id, merged.name);
       renderSites();
       showScreen("screen-sites");
-      openSiteDetail(existing.id);
+      openSiteDetail(existing.id, "sites");
       toast("주소가 같은 기존 현장을 찾아 정보를 갱신했습니다.", "success");
     } else {
       data.createdAt = new Date().toISOString();
@@ -1991,7 +2004,7 @@
       await saveSiteAttachments(site.id, site.name);
       renderSites();
       showScreen("screen-sites");
-      openSiteDetail(site.id);
+      openSiteDetail(site.id, "sites");
     }
   });
 
@@ -2170,8 +2183,9 @@
     autoSuggestFireStation(address);
   });
 
-  async function openSiteDetail(id) {
+  async function openSiteDetail(id, origin) {
     currentSiteId = id;
+    if (origin) currentSiteDetailOrigin = origin;
     const site = await FireDB.getSite(id);
     if (!site) { renderSites(); showScreen("screen-sites"); return; }
     $("#siteDetailInfo").innerHTML = `
@@ -2258,6 +2272,8 @@
         });
       });
     }
+    // "거래처 관리"에서 연 현장은 날짜/점검하기 버튼을 숨긴다 - "점검팀"에서 연 현장만 보여준다(사용자 요청).
+    $(".site-start-inspection-row").classList.toggle("hidden", currentSiteDetailOrigin === "entry");
     showScreen("screen-site-detail");
   }
 
