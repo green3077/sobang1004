@@ -11,11 +11,12 @@
   let currentConstructionSiteId = null;  // 공사팀에서 보고 있는 업체(=현장)
   let activeObjectUrls = [];
   let pendingAttachments = [];   // 신규 현장 등록 시 아직 저장 전인 첨부파일 (저장 시점에 실제 siteId로 옮겨 담음)
-  let sitesSortMode = "name";    // "name"(가나다순) | "region"(지역별) - 거래처 목록 정렬 방식
+  let sitesSortMode = "name";    // "name"(가나다순) | "region"(지역별) | "recent"(최신순 - 마지막 점검일 기준) - 거래처 목록 정렬 방식
   let sitesSelectedRegion = null; // 지역별 모드에서 드릴다운한 지역 (구/도 이름), null이면 지역 버튼 목록 표시 중
-  // "이번달" 필터 - 정렬 방식과 별개로 켜고 끌 수 있는 토글. "거래처 관리"(등록 화면 아래 목록)와
-  // "점검팀"(거래처 목록) 두 화면이 이 상태를 공유한다 - 같은 거래처 목록을 보여주는 화면이라서.
-  let sitesMonthOnly = false;
+  // "이번달"/"다음달"/"지난달" 필터 - 정렬 방식과 별개로 셋 중 하나만 켤 수 있다(null이면 전체).
+  // "거래처 관리"(등록 화면 아래 목록)와 "점검팀"(거래처 목록) 두 화면이 이 상태를 공유한다 -
+  // 같은 거래처 목록을 보여주는 화면이라서. 지적사항 허브(defMonthFilter)와 동일한 규칙.
+  let sitesMonthFilter = null;   // null | "this" | "next" | "last"
   let defSortMode = "name";      // 지적사항 허브(업체별) 정렬 방식: "name"(가나다순) | "region"(지역별) | "recent"(최신순 - 점검완료일 기준)
   let defSelectedRegion = null;
   let defFilters = new Set();    // 지적사항 허브 상태 필터: "pending"|"none"|"open"|"resolved" 중 선택된 것들 (OR 조건)
@@ -34,9 +35,9 @@
   let scheduleStagedIds = new Set();  // 업체 선택 화면에서 "확인"을 누르기 전까지 임시로 체크된 업체 (저장 전)
   // 업체 선택 목록 전용 정렬/필터 상태 - "거래처 관리"/"점검팀" 화면의 sitesSortMode와는 별개로 둔다
   // (날짜별로 업체를 고르는 일시적인 작업이라, 여기서 지역별을 골랐다고 다른 화면까지 바뀌면 오히려 헷갈림).
-  let schedulePickSortMode = "name";      // "name"(가나다순) | "region"(지역별)
+  let schedulePickSortMode = "name";      // "name"(가나다순) | "region"(지역별) | "recent"(최신순)
   let schedulePickSelectedRegion = null;
-  let schedulePickMonthOnly = false;      // "이번달" 필터
+  let schedulePickMonthFilter = null;     // null | "this" | "next" | "last"
 
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -636,9 +637,23 @@
       { center: "가흥", areas: ["상망동", "하망동", "영주1동", "영주2동", "가흥2동", "장수면", "안정면"] },
       { center: "풍기", areas: ["풍기읍", "봉현면", "순흥면", "단산면", "부석면"] }
     ],
+    // 출처: 영천소방서 홈페이지 관할현황(gb119.go.kr, 사용자 제공 스크린샷 대조, 2026-09-07 확인) -
+    // 기존엔 행정동(동부동/중앙동/서부동/완산동/남부동) 이름만 있어서, 도로명주소에 괄호로 붙는
+    // 법정동 이름(예: "시청남1길 15(문외동)")은 못 잡았다(사용자 리포트: 영천 문외동 주소에서
+    // 관할119안전센터가 안 나온다, 2026-09-07). 행정동 산하 법정동을 전부 추가했다 - 지번주소 등
+    // 행정동 이름을 그대로 쓰는 주소도 여전히 잡히도록 행정동 이름 자체도 그대로 남겨뒀다.
     "영천소방서": [
-      { center: "동부", areas: ["동부동", "중앙동", "서부동", "화북면", "화남면", "자양면", "임고면", "고경면"] },
-      { center: "남부", areas: ["완산동", "남부동", "북안면"] },
+      { center: "동부", areas: [
+        "동부동", "망정동", "야사동", "조교동", "언하동", "신기동",
+        "중앙동", "문외동", "문내동", "창구동", "오미동", "녹전동", "도림동", "매산동",
+        "서부동", "교촌동", "성내동", "화룡동", "오수동", "생계동", "대전동", "서산동",
+        "화북면", "화남면", "자양면", "임고면", "고경면"
+      ] },
+      { center: "남부", areas: [
+        "완산동",
+        "남부동", "작산동", "금노동", "범어동", "도동", "봉동", "도남동", "본촌동", "채신동", "괴연동",
+        "북안면"
+      ] },
       { center: "금호", areas: ["금호읍", "대창면"] },
       { center: "신녕", areas: ["신녕면", "화산면", "청통면"] }
     ],
@@ -860,9 +875,12 @@
     // 대구 달성군의 법정리 이름 중 일부(예: "이천리")가 부산 기장군 일광면의 리 이름과 우연히 같아서
     // (사용자 리포트 前 자체 테스트로 발견: "부산 기장군 일광면 이천리"가 대구 강서소방서로 오판됨,
     // 2026-09-01), 주소에 "부산"이 있으면 이 리·동 이름 기반 대구 추정 전체를 건너뛴다 - "대구"가
-    // 명시된 진짜 대구 주소는 어차피 "부산"을 포함하지 않으므로 안전하다.
+    // 명시된 진짜 대구 주소는 어차피 "부산"을 포함하지 않으므로 안전하다. 같은 이유로 대구 북구의
+    // "도남동"이 영천시 남부동 관할의 "도남동"과도 우연히 같아서(사용자 리포트: 영천시 도남동
+    // 주소가 대구 강북소방서로 잘못 잡힘, 2026-09-07) "영천"이 있을 때도 건너뛴다.
     const isBusan = addr.includes("부산");
-    const hasKnownDaeguArea = !isBusan && (
+    const isYeongcheon = addr.includes("영천");
+    const hasKnownDaeguArea = !isBusan && !isYeongcheon && (
       DAEGU_BUK_GU_GANGBUK_DONGS.some((a) => addr.includes(a)) ||
       DAEGU_DALSEO_GU_GANGSEO_DONGS.some((a) => addr.includes(a)) ||
       DAEGU_DALSEONG_GUN_GANGSEO_AREAS.some((a) => addr.includes(a))
@@ -1014,9 +1032,13 @@
     return sched.comprehensiveMonth === month || sched.operationalMonth === month;
   }
 
-  // "이번달" 필터 - 이번 달이 그 현장의 종합점검월 또는 작동점검월과 같으면 true.
-  function isSiteInCurrentMonth(site) {
-    return isSiteInMonth(site, new Date().getMonth() + 1);
+  // "이번달"/"다음달"/"지난달" 버튼이 가리키는 실제 달(1~12) - 오늘 기준으로 계산한다. 거래처
+  // 목록/지적사항 허브/스케줄 관리 업체선택, 월 필터를 쓰는 화면 셋이 이 함수 하나를 공유한다.
+  function targetMonthFor(monthFilter) {
+    const cur = new Date().getMonth() + 1;
+    if (monthFilter === "next") return cur === 12 ? 1 : cur + 1;
+    if (monthFilter === "last") return cur === 1 ? 12 : cur - 1;
+    return cur; // "this"
   }
 
   function showScreen(id) {
@@ -1535,16 +1557,25 @@
     return lastBySite;
   }
 
+  // "최신순" 정렬용 - 마지막으로 완료된 점검일(없으면 빈 문자열, 정렬 시 맨 뒤로).
+  function lastInspectionDateForSort(last) {
+    return last ? (last.completedDate || last.scheduledDate || "") : "";
+  }
+
   // 거래처 목록 렌더링 본체 - listElId/summaryElId/toolbarIds만 다르면 "거래처 관리" 화면 아래 목록과
-  // "점검팀" 화면 둘 다 이 함수 하나로 그린다(정렬/지역/이번달 상태는 공유).
+  // "점검팀" 화면 둘 다 이 함수 하나로 그린다(정렬/지역/월 필터 상태는 공유). 지적사항 허브와 같은
+  // 규칙: 월 필터가 켜져 있으면 그에 맞는 정렬을 강제한다(이번달→최신순, 다음달/지난달→가나다순).
   async function renderSiteListInto(listElId, summaryElId, toolbarIds) {
-    $("#" + toolbarIds.name).classList.toggle("active", sitesSortMode === "name");
-    $("#" + toolbarIds.region).classList.toggle("active", sitesSortMode === "region");
-    $("#" + toolbarIds.month).classList.toggle("active", sitesMonthOnly);
+    $("#" + toolbarIds.name).classList.toggle("active", sitesSortMode === "name" && !sitesMonthFilter);
+    $("#" + toolbarIds.region).classList.toggle("active", sitesSortMode === "region" && !sitesMonthFilter);
+    $("#" + toolbarIds.recent).classList.toggle("active", sitesSortMode === "recent" && !sitesMonthFilter);
+    $("#" + toolbarIds.thisMonth).classList.toggle("active", sitesMonthFilter === "this");
+    $("#" + toolbarIds.nextMonth).classList.toggle("active", sitesMonthFilter === "next");
+    $("#" + toolbarIds.lastMonth).classList.toggle("active", sitesMonthFilter === "last");
 
     const [allSites, inspections] = await Promise.all([FireDB.getAllSites(), FireDB.getAllInspections()]);
     allSites.sort((a, b) => a.name.localeCompare(b.name, "ko"));
-    const sites = sitesMonthOnly ? allSites.filter(isSiteInCurrentMonth) : allSites;
+    const sites = sitesMonthFilter ? allSites.filter((s) => isSiteInMonth(s, targetMonthFor(sitesMonthFilter))) : allSites;
 
     const lastBySite = computeLastInspectionBySite(inspections);
 
@@ -1555,29 +1586,41 @@
     const origin = listElId === "entrySitesList" ? "entry" : "sites";
     if (sites.length === 0) {
       summary.textContent = "";
-      list.innerHTML = sitesMonthOnly
-        ? `<div class="empty-state">이번 달 종합점검/작동점검 대상 거래처가 없습니다.</div>`
+      list.innerHTML = sitesMonthFilter
+        ? `<div class="empty-state">선택한 달에 종합점검/작동점검 대상인 거래처가 없습니다.</div>`
         : `<div class="empty-state">등록된 현장이 없습니다.<br>현장을 추가해 점검을 시작하세요.</div>`;
       return;
     }
 
-    if (sitesSortMode === "region") {
+    const effectiveSortMode = !sitesMonthFilter ? sitesSortMode : (sitesMonthFilter === "this" ? "recent" : "name");
+    let ordered = sites;
+    if (effectiveSortMode === "recent") {
+      ordered = [...sites].sort((a, b) => lastInspectionDateForSort(lastBySite.get(b.id)).localeCompare(lastInspectionDateForSort(lastBySite.get(a.id))));
+    }
+
+    if (effectiveSortMode === "region") {
       if (sitesSelectedRegion) {
-        const inRegion = sites.filter((s) => classifyRegion(s.address) === sitesSelectedRegion).length;
-        summary.innerHTML = `<strong>${sitesSelectedRegion}</strong> ${inRegion}개 · 전체 ${sites.length}개`;
+        const inRegion = ordered.filter((s) => classifyRegion(s.address) === sitesSelectedRegion).length;
+        summary.innerHTML = `<strong>${sitesSelectedRegion}</strong> ${inRegion}개 · 전체 ${ordered.length}개`;
       } else {
-        const regionCount = new Set(sites.map((s) => classifyBroadRegion(s.address))).size;
-        summary.innerHTML = `전체 <strong>${sites.length}개</strong> 거래처 · ${regionCount}개 지역`;
+        const regionCount = new Set(ordered.map((s) => classifyBroadRegion(s.address))).size;
+        summary.innerHTML = `전체 <strong>${ordered.length}개</strong> 거래처 · ${regionCount}개 지역`;
       }
-      renderSitesByRegion(sites, lastBySite, list, rerender, origin);
+      renderSitesByRegion(ordered, lastBySite, list, rerender, origin);
       return;
     }
-    summary.innerHTML = `전체 <strong>${sites.length}개</strong> 거래처`;
-    renderSiteCardsInto(list, sites, lastBySite, "등록된 현장이 없습니다.", origin);
+    summary.innerHTML = `전체 <strong>${ordered.length}개</strong> 거래처`;
+    renderSiteCardsInto(list, ordered, lastBySite, "등록된 현장이 없습니다.", origin);
   }
 
-  const SITES_TOOLBAR_IDS = { name: "btnSortByName", region: "btnSortByRegion", month: "btnFilterThisMonth" };
-  const ENTRY_SITES_TOOLBAR_IDS = { name: "btnEntrySortByName", region: "btnEntrySortByRegion", month: "btnEntryFilterThisMonth" };
+  const SITES_TOOLBAR_IDS = {
+    name: "btnSortByName", region: "btnSortByRegion", recent: "btnSortByRecent",
+    thisMonth: "btnFilterThisMonth", nextMonth: "btnFilterNextMonth", lastMonth: "btnFilterLastMonth"
+  };
+  const ENTRY_SITES_TOOLBAR_IDS = {
+    name: "btnEntrySortByName", region: "btnEntrySortByRegion", recent: "btnEntrySortByRecent",
+    thisMonth: "btnEntryFilterThisMonth", nextMonth: "btnEntryFilterNextMonth", lastMonth: "btnEntryFilterLastMonth"
+  };
 
   function renderSites() {
     return renderSiteListInto("sitesList", "sitesSummary", SITES_TOOLBAR_IDS);
@@ -1586,22 +1629,38 @@
     return renderSiteListInto("entrySitesList", "entrySitesSummary", ENTRY_SITES_TOOLBAR_IDS);
   }
 
-  // 가나다순/지역별/이번달 툴바 버튼 3개를 한 화면분 통째로 연결한다 - "거래처 관리"/"점검팀" 두
-  // 화면이 각자의 버튼 id만 다르고 나머지 동작은 동일해서 이 함수 하나로 양쪽을 다 연결한다.
+  // 가나다순/지역별/최신순/이번달/다음달/지난달 툴바 버튼 6개를 한 화면분 통째로 연결한다 -
+  // "거래처 관리"/"점검팀" 두 화면이 각자의 버튼 id만 다르고 나머지 동작은 동일해서 이 함수
+  // 하나로 양쪽을 다 연결한다(지적사항 허브 툴바와 동일한 규칙).
   function wireSiteSortToolbar(toolbarIds, renderFn) {
     $("#" + toolbarIds.name).addEventListener("click", () => {
       sitesSortMode = "name";
       sitesSelectedRegion = null;
+      sitesMonthFilter = null;
       renderFn();
     });
     $("#" + toolbarIds.region).addEventListener("click", () => {
       sitesSortMode = "region";
+      sitesMonthFilter = null;
       renderFn();
     });
-    $("#" + toolbarIds.month).addEventListener("click", () => {
-      sitesMonthOnly = !sitesMonthOnly;
+    $("#" + toolbarIds.recent).addEventListener("click", () => {
+      sitesSortMode = "recent";
+      sitesSelectedRegion = null;
+      sitesMonthFilter = null;
       renderFn();
     });
+    // "이번달"/"다음달"/"지난달"은 서로 배타적인 토글 버튼 - 켜져 있는 걸 다시 누르면 꺼진다(전체 보기로 복귀).
+    function wireMonthButton(key, value) {
+      $("#" + toolbarIds[key]).addEventListener("click", () => {
+        sitesMonthFilter = sitesMonthFilter === value ? null : value;
+        sitesSelectedRegion = null;
+        renderFn();
+      });
+    }
+    wireMonthButton("thisMonth", "this");
+    wireMonthButton("nextMonth", "next");
+    wireMonthButton("lastMonth", "last");
   }
   wireSiteSortToolbar(SITES_TOOLBAR_IDS, renderSites);
   wireSiteSortToolbar(ENTRY_SITES_TOOLBAR_IDS, renderEntrySites);
@@ -2918,14 +2977,6 @@
     return countsBySite;
   }
 
-  // "이번달"/"다음달"/"지난달" 버튼이 가리키는 실제 달(1~12) - 오늘 기준으로 계산한다.
-  function defTargetMonth() {
-    const cur = new Date().getMonth() + 1;
-    if (defMonthFilter === "next") return cur === 12 ? 1 : cur + 1;
-    if (defMonthFilter === "last") return cur === 1 ? 12 : cur - 1;
-    return cur; // "this"
-  }
-
   async function renderDeficiencyHub() {
     $("#btnDefSortByName").classList.toggle("active", defSortMode === "name" && !defMonthFilter);
     $("#btnDefSortByRegion").classList.toggle("active", defSortMode === "region" && !defMonthFilter);
@@ -2952,7 +3003,7 @@
 
     // "이번달"/"다음달"/"지난달"은 종합/작동점검월이 그 달에 해당하는 거래처만 남긴다(사용자 요청).
     if (defMonthFilter) {
-      const month = defTargetMonth();
+      const month = targetMonthFor(defMonthFilter);
       filtered = filtered.filter((s) => isSiteInMonth(s, month));
     }
 
@@ -4527,13 +4578,17 @@
   // 실제로 그 날짜의 예정 업체로 저장되는 시점은 "확인" 버튼을 눌렀을 때뿐이다. 검색어가 있으면
   // 정렬/지역/이번달 상태와 무관하게 이름으로만 걸러진 평평한 목록을 보여준다(검색이 우선).
   async function renderScheduleCompanyPickList() {
-    $("#btnSchedulePickSortByName").classList.toggle("active", schedulePickSortMode === "name");
-    $("#btnSchedulePickSortByRegion").classList.toggle("active", schedulePickSortMode === "region");
-    $("#btnSchedulePickFilterThisMonth").classList.toggle("active", schedulePickMonthOnly);
+    $("#btnSchedulePickSortByName").classList.toggle("active", schedulePickSortMode === "name" && !schedulePickMonthFilter);
+    $("#btnSchedulePickSortByRegion").classList.toggle("active", schedulePickSortMode === "region" && !schedulePickMonthFilter);
+    $("#btnSchedulePickSortByRecent").classList.toggle("active", schedulePickSortMode === "recent" && !schedulePickMonthFilter);
+    $("#btnSchedulePickFilterThisMonth").classList.toggle("active", schedulePickMonthFilter === "this");
+    $("#btnSchedulePickFilterNextMonth").classList.toggle("active", schedulePickMonthFilter === "next");
+    $("#btnSchedulePickFilterLastMonth").classList.toggle("active", schedulePickMonthFilter === "last");
 
-    const allSites = await FireDB.getAllSites();
+    const [allSites, inspections] = await Promise.all([FireDB.getAllSites(), FireDB.getAllInspections()]);
     allSites.sort((a, b) => a.name.localeCompare(b.name, "ko"));
-    const sites = schedulePickMonthOnly ? allSites.filter(isSiteInCurrentMonth) : allSites;
+    const sites = schedulePickMonthFilter ? allSites.filter((s) => isSiteInMonth(s, targetMonthFor(schedulePickMonthFilter))) : allSites;
+    const lastBySite = computeLastInspectionBySite(inspections);
 
     const list = $("#scheduleCompanyPickList");
     const term = scheduleCompanySearchTerm.trim();
@@ -4547,13 +4602,19 @@
     }
 
     if (sites.length === 0) {
-      list.innerHTML = `<div class="empty-state">${schedulePickMonthOnly ? "이번 달 종합점검/작동점검 대상 거래처가 없습니다." : "등록된 업체가 없습니다."}</div>`;
+      list.innerHTML = `<div class="empty-state">${schedulePickMonthFilter ? "선택한 달에 종합점검/작동점검 대상인 거래처가 없습니다." : "등록된 업체가 없습니다."}</div>`;
       return;
     }
 
-    if (schedulePickSortMode === "region") {
+    const effectiveSortMode = !schedulePickMonthFilter ? schedulePickSortMode : (schedulePickMonthFilter === "this" ? "recent" : "name");
+    let ordered = sites;
+    if (effectiveSortMode === "recent") {
+      ordered = [...sites].sort((a, b) => lastInspectionDateForSort(lastBySite.get(b.id)).localeCompare(lastInspectionDateForSort(lastBySite.get(a.id))));
+    }
+
+    if (effectiveSortMode === "region") {
       if (schedulePickSelectedRegion) {
-        const filtered = sites.filter((s) => classifyRegion(s.address) === schedulePickSelectedRegion);
+        const filtered = ordered.filter((s) => classifyRegion(s.address) === schedulePickSelectedRegion);
         const backBtnHtml = `<button class="btn btn-secondary region-back-row" type="button">← 지역 목록으로 (${escapeHtml(schedulePickSelectedRegion)})</button>`;
         list.innerHTML = filtered.length === 0
           ? `${backBtnHtml}<div class="empty-state">이 지역에 등록된 현장이 없습니다.</div>`
@@ -4566,7 +4627,7 @@
         return;
       }
       const counts = new Map();
-      sites.forEach((s) => {
+      ordered.forEach((s) => {
         const region = classifyRegion(s.address);
         counts.set(region, (counts.get(region) || 0) + 1);
       });
@@ -4586,23 +4647,38 @@
       return;
     }
 
-    list.innerHTML = sites.map(scheduleCompanyPickRowHtml).join("");
+    list.innerHTML = ordered.map(scheduleCompanyPickRowHtml).join("");
     bindScheduleCompanyPickRowClicks(list);
   }
 
   $("#btnSchedulePickSortByName").addEventListener("click", () => {
     schedulePickSortMode = "name";
     schedulePickSelectedRegion = null;
+    schedulePickMonthFilter = null;
     renderScheduleCompanyPickList();
   });
   $("#btnSchedulePickSortByRegion").addEventListener("click", () => {
     schedulePickSortMode = "region";
+    schedulePickMonthFilter = null;
     renderScheduleCompanyPickList();
   });
-  $("#btnSchedulePickFilterThisMonth").addEventListener("click", () => {
-    schedulePickMonthOnly = !schedulePickMonthOnly;
+  $("#btnSchedulePickSortByRecent").addEventListener("click", () => {
+    schedulePickSortMode = "recent";
+    schedulePickSelectedRegion = null;
+    schedulePickMonthFilter = null;
     renderScheduleCompanyPickList();
   });
+  // "이번달"/"다음달"/"지난달"은 서로 배타적인 토글 버튼 - 켜져 있는 걸 다시 누르면 꺼진다(전체 보기로 복귀).
+  function wireSchedulePickMonthButton(id, value) {
+    $("#" + id).addEventListener("click", () => {
+      schedulePickMonthFilter = schedulePickMonthFilter === value ? null : value;
+      schedulePickSelectedRegion = null;
+      renderScheduleCompanyPickList();
+    });
+  }
+  wireSchedulePickMonthButton("btnSchedulePickFilterThisMonth", "this");
+  wireSchedulePickMonthButton("btnSchedulePickFilterNextMonth", "next");
+  wireSchedulePickMonthButton("btnSchedulePickFilterLastMonth", "last");
 
   async function refreshScheduleManage() {
     await Promise.all([renderScheduleCalendar(), renderScheduleDayDetail(), renderScheduleCompanyPickList()]);
