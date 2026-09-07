@@ -1176,9 +1176,11 @@
       .filter((id) => siteMap.has(id) && !relevantSiteIds.has(id));
     const scheduleItems = confirmedSiteIds.map((id) => {
       const site = siteMap.get(id);
-      // 여기도 마찬가지로 종합/작동점검 대상월이 아니면(월점검) "오늘의 주요 할일"에서 뺀다.
+      // 스케줄 관리에서 직접 "오늘 방문"으로 확정한 곳은 종합/작동점검 대상월이 아니어도(월점검)
+      // 그대로 보여준다(사용자 요청, 2026-09-07) - 직접 확정한 방문은 그 자체로 오늘 할일이
+      // 맞고, inspectionItems처럼 자동으로 쌓이는 목록이 아니라 사람이 골라 확정한 것이라서
+      // 월점검이라고 걸러버리면 "확정했는데 안 보인다"는 문제가 생긴다.
       const typeLabel = inspectionTypeForMonth(site, today);
-      if (typeLabel === "월점검") return null;
       const last = lastBySite.get(id);
       const lastDate = last ? (last.completedDate || last.scheduledDate) : "";
       const html = `
@@ -1199,7 +1201,7 @@
         </div>
       `;
       return { siteId: id, html };
-    }).filter(Boolean);
+    });
     // 스케줄 관리(오늘 날짜)에서 정한 방문 순서 그대로 표시(사용자 요청) - 그 순서에 없는 항목
     // (예: 여러 날짜 전부터 밀려온 기한초과 점검)은 순서 정보가 없으므로 뒤로 보내되, 그런
     // 항목끼리는 원래 순서(기한초과 날짜순)를 그대로 유지한다.
